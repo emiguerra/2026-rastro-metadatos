@@ -2,6 +2,8 @@
 
 herramientas para leer los metadatos de las fotos de los participantes de rastro: inscripción, subida de 7 fotos de la semana, y un visor que convierte esas fotos en un recorrido por comuna y día, sin guardar coordenadas exactas.
 
+la captura del cuerpo (postura, rostro, ojos) está en [2026-tres-analisis-paralelo](https://github.com/emiguerra/2026-tres-analisis-paralelo). la hoja 1 del expediente sale de ahí; la hoja 2, de este repo.
+
 el contenido de fondo (qué trae una imagen, por qué comunas y no direcciones, metodología del testeo) está en el documento *rastro — Sistema de metadatos y metodología de testeo*. el orden y las fechas, en el plan operativo.
 
 | pieza | archivo | qué hace |
