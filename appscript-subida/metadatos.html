@@ -1,0 +1,25 @@
+// Rutina compartida por las páginas del servidor y las páginas locales.
+window.RastroExif = {
+  async leer(blob) {
+    let tags;
+    try {
+      tags = await exifr.parse(blob, {
+        tiff: true, exif: true, gps: true, ifd1: false, interop: false,
+        xmp: false, icc: false, iptc: false, makerNote: false,
+        userComment: false, reviveValues: false,
+      });
+    } catch (error) {
+      return { estado: 'error', gps: false, fecha: null, zona: null, modelo: null };
+    }
+    let pos = null;
+    try { pos = await exifr.gps(blob); } catch (error) {}
+    const lat = pos && typeof pos.latitude === 'number' ? pos.latitude : null;
+    const lon = pos && typeof pos.longitude === 'number' ? pos.longitude : null;
+    return {
+      estado: 'ok', gps: lat != null && lon != null,
+      fecha: tags && tags.DateTimeOriginal != null ? String(tags.DateTimeOriginal) : null,
+      zona: tags && tags.OffsetTimeOriginal ? String(tags.OffsetTimeOriginal) : null,
+      modelo: tags && tags.Model ? `${tags.Make || ''} ${tags.Model}`.trim() : null,
+    };
+  },
+};

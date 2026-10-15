@@ -73,6 +73,21 @@ def dimensiones(m):
     return tuple(sorted((w, h)))  # ignora la rotación
 
 
+def stem(m):
+    return Path(m.get("FileName", "")).stem.casefold()
+
+
+def gps_igual(a, b):
+    if not (tiene_gps(a) and tiene_gps(b)):
+        return False
+    return (abs(float(a["GPSLatitude"]) - float(b["GPSLatitude"])) <= 1e-5 and
+            abs(float(a["GPSLongitude"]) - float(b["GPSLongitude"])) <= 1e-5)
+
+
+def celda(valor):
+    return str(valor).replace("|", "\\|").replace("\n", " ").replace("\r", " ")
+
+
 def evaluar(raiz, detalle):
     grupos = defaultdict(list)
     for m in leer_metadatos(raiz):
@@ -84,8 +99,11 @@ def evaluar(raiz, detalle):
     base = {}
     for (canal, tel), fotos in grupos.items():
         if canal == ORIGINAL:
+            por_nombre = defaultdict(list)
+            for foto in fotos:
+                por_nombre[stem(foto)].append(foto)
             base[tel] = {
-                "nombres": {Path(f["FileName"]).stem for f in fotos},
+                "por_nombre": {nombre: fs[0] for nombre, fs in por_nombre.items() if len(fs) == 1},
                 "software": {str(f.get("Software", "")) for f in fotos},
                 "dims": {dimensiones(f) for f in fotos},
                 "formato": {f.get("FileType", "?") for f in fotos},
@@ -94,6 +112,10 @@ def evaluar(raiz, detalle):
             if sin_gps:
                 print(f"⚠️  Línea base {tel}: sin GPS en {', '.join(sin_gps)}. "
                       "Reemplaza esas fotos antes de seguir.\n")
+            repetidos = [nombre for nombre, fs in por_nombre.items() if len(fs) > 1]
+            if repetidos:
+                print(f"⚠️  Línea base {tel}: nombres repetidos; esas fotos no se emparejan: "
+                      f"{', '.join(repetidos)}.\n")
 
     if not base:
         print(f"⚠️  No hay carpeta {ORIGINAL}/: no se puede comparar nombre, software ni dimensiones.\n")
@@ -110,9 +132,13 @@ def evaluar(raiz, detalle):
         formatos = sorted({f.get("FileType", "?") for f in fotos})
 
         obs = []
+        gps_iguales = 0
         if b:
-            nombre = sum(any(o in f["FileName"] for o in b["nombres"]) for f in fotos)
+            nombre = sum(stem(f) in b["por_nombre"] for f in fotos)
             nombre_txt = f"{nombre}/{n}"
+            gps_iguales_txt = f"{sum(gps_igual(f, b['por_nombre'].get(stem(f), {})) for f in fotos)}/{n}"
+            if nombre < n:
+                obs.append(f"{n - nombre}/{n} fotos sin pareja por nombre")
             if set(formatos) != b["formato"]:
                 obs.append(f"formato cambió ({'/'.join(sorted(b['formato']))} → {'/'.join(formatos)})")
             soft = {str(f.get("Software", "")) for f in fotos} - b["software"]
@@ -123,19 +149,20 @@ def evaluar(raiz, detalle):
                 obs.append("dimensiones cambiaron (posible recorte o compresión)")
         else:
             nombre_txt = "?"
+            gps_iguales_txt = "—"
         if zona < fecha:
             obs.append(f"zona horaria solo en {zona}/{n}")
         if n != 3:
             obs.append(f"{n} fotos (se esperaban 3)")
 
         nombre_canal = f"{canal} (control)" if canal == ORIGINAL else canal
-        filas.append((nombre_canal, tel, f"{gps}/{n}", f"{fecha}/{n}", f"{modelo}/{n}",
+        filas.append((nombre_canal, tel, f"{gps}/{n}", gps_iguales_txt, f"{fecha}/{n}", f"{modelo}/{n}",
                       nombre_txt, "/".join(formatos), "; ".join(obs)))
 
-    print("| Canal | Teléfono | GPS | Fecha/hora | Modelo | Nombre conservado | Formato llegada | Observaciones |")
-    print("| --- | --- | --- | --- | --- | --- | --- | --- |")
+    print("| Canal | Teléfono | GPS | GPS coincidente (±1 m aprox.) | Fecha/hora | Modelo | Nombre conservado | Formato llegada | Observaciones |")
+    print("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
     for f in filas:
-        print("| " + " | ".join(f) + " |")
+        print("| " + " | ".join(celda(x) for x in f) + " |")
 
     print("\nUn canal conserva un dato si lo mantiene en al menos 2 de 3 fotos.")
     for canal in sorted({c for c, _ in grupos} - {ORIGINAL}):
@@ -151,7 +178,7 @@ def evaluar(raiz, detalle):
         print("| --- | --- | --- | --- | --- | --- | --- | --- | --- |")
         for (canal, tel) in sorted(grupos):
             for f in sorted(grupos[(canal, tel)], key=lambda x: x["FileName"]):
-                print(f"| {canal} | {tel} | {f['FileName']} | {'sí' if tiene_gps(f) else 'no'} | "
+                print(f"| {celda(canal)} | {celda(tel)} | {celda(f['FileName'])} | {'sí' if tiene_gps(f) else 'no'} | "
                       f"{f.get('DateTimeOriginal', '—')} | {f.get('OffsetTimeOriginal', '—')} | "
                       f"{f.get('Make', '')} {f.get('Model', '—')} | {f.get('Software', '—')} | "
                       f"{f.get('FileType', '?')} |")
