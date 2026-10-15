@@ -1,0 +1,1306 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visor · rastro</title>
+<!--
+  Visor local de las fotos del testeo. Abrir con Live Server desde la carpeta metadatos/
+  (necesita comunas.json al lado).
+  Lee la pestaña Subidas a través del Apps Script (metadatos/appscript-subida/Code.gs),
+  agrupa las fotos por participante (Código P) y muestra el recorrido de cada uno.
+  Las fotos de un participante se descargan solo al abrirlo y quedan guardadas en este navegador.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;700&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
+<style>
+  /* Mismo sistema que las páginas del testeo: blanco, negro y verde ácido. El verde marca
+     lo seleccionado; "sin ubicación" se marca en negro con fondo verde para que salte a la vista. */
+  :root {
+    --blanco: #ffffff;
+    --negro: #0b0b0b;
+    --verde: #c6f21c;
+    --tenue: rgba(11, 11, 11, .5);
+    --linea: rgba(11, 11, 11, .14);
+    --fondo: #f4f4f1;
+    --sans: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    --radio: 1.25rem;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body { margin: 0; background: var(--fondo); color: var(--negro); font: 500 .95rem/1.45 var(--sans); -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; }
+
+  /* Barra superior */
+  .barra { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; padding: .9rem 1.25rem; background: var(--blanco); border-bottom: 1.5px solid var(--negro); position: sticky; top: 0; z-index: 5; }
+  .marca { font-size: 1.3rem; letter-spacing: -.02em; margin-right: auto; }
+  .marca b { font-weight: 600; }
+  .marca span { color: var(--tenue); }
+  .barra input { font: 500 .85rem var(--mono); padding: .5rem .75rem; border: 1.5px solid var(--negro); border-radius: 999px; background: var(--blanco); width: 15rem; max-width: 100%; }
+  .btn { font-weight: 600; background: var(--verde); border: 1.5px solid var(--negro); border-radius: 999px; padding: .5rem 1rem; cursor: pointer; white-space: nowrap; }
+  .btn:hover { background: var(--negro); color: var(--verde); }
+  .btn.sec { background: var(--blanco); }
+  .btn.sec:hover { background: var(--negro); color: var(--blanco); }
+  .btn:disabled { opacity: .45; cursor: default; }
+  .btn:focus-visible, .grupo:focus-visible, .tarjeta:focus-visible { outline: 2px solid var(--negro); outline-offset: 2px; }
+  #archivos { position: absolute; width: 1px; height: 1px; opacity: 0; }
+  .estado { flex-basis: 100%; font-size: .8rem; color: var(--tenue); margin: 0; }
+  .estado.error { color: var(--negro); font-weight: 600; }
+  .estado.error::before { content: "! "; }
+
+  /* Distribución: lista de participantes a la izquierda, recorrido a la derecha */
+  .cuerpo { display: grid; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 52rem) {
+    .cuerpo { grid-template-columns: 17rem minmax(0, 1fr); min-height: calc(100vh - 4.5rem); }
+    .lateral { border-right: 1.5px solid var(--negro); position: sticky; top: 4.5rem; height: calc(100vh - 4.5rem); overflow-y: auto; }
+  }
+
+  .lateral { background: var(--blanco); padding: 1rem; display: grid; gap: .5rem; align-content: start; }
+  .lateral h2 { font-size: .75rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--tenue); margin: .25rem 0; }
+  .grupo { text-align: left; background: var(--blanco); border: 1.5px solid var(--negro); border-radius: 1rem; padding: .7rem .85rem; cursor: pointer; display: grid; gap: .1rem; }
+  .grupo b { font-size: 1.15rem; letter-spacing: -.02em; }
+  .grupo span { font-size: .78rem; color: var(--tenue); }
+  .grupo[aria-current="true"] { background: var(--verde); }
+  .grupo[aria-current="true"] span { color: var(--negro); }
+  .lateral .vacio { font-size: .85rem; color: var(--tenue); }
+
+  .principal { padding: 1.25rem; display: grid; gap: 1.25rem; align-content: start; min-width: 0; }
+  .bienvenida { max-width: 36rem; display: grid; gap: .5rem; padding-top: 2rem; }
+  .bienvenida h1 { font-size: 2.2rem; letter-spacing: -.045em; line-height: 1; margin: 0; }
+  .bienvenida p { margin: 0; color: var(--tenue); }
+
+  /* Cabecera del participante */
+  .cabecera { background: var(--negro); color: var(--blanco); border-radius: var(--radio); padding: 1.25rem 1.5rem; display: grid; gap: 1rem; }
+  .cabecera .arriba { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: end; gap: .75rem; }
+  .cabecera h1 { font-size: clamp(2.5rem, 7vw, 4rem); font-weight: 700; letter-spacing: -.05em; line-height: .9; margin: 0; }
+  .cabecera h1 small { font-size: .9rem; font-weight: 500; letter-spacing: 0; color: rgba(255, 255, 255, .6); margin-left: .5rem; }
+  .cabecera .btn { background: var(--verde); color: var(--negro); }
+  .cabecera .btn:hover { background: var(--blanco); }
+  .cifras { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid rgba(255, 255, 255, .25); padding-top: .9rem; }
+  .cifra { display: grid; gap: .1rem; min-width: 0; }
+  .cifra + .cifra { border-left: 1px solid rgba(255, 255, 255, .25); padding-left: .9rem; }
+  .cifra b { font-size: clamp(1.4rem, 4vw, 2rem); font-weight: 600; letter-spacing: -.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+  .cifra b.alerta { color: var(--verde); }
+  .cifra span { font-size: .75rem; color: rgba(255, 255, 255, .6); }
+  .ruta { font-size: 1.05rem; font-weight: 600; letter-spacing: -.01em; }
+  .ruta span { color: var(--verde); }
+  .ruta .sep { color: rgba(255, 255, 255, .45); font-weight: 400; margin: 0 .35rem; }
+
+  .cargando { display: grid; gap: .5rem; max-width: 30rem; }
+  .barra-progreso { height: .7rem; border: 1.5px solid var(--negro); border-radius: 999px; overflow: hidden; background: var(--blanco); }
+  .barra-progreso i { display: block; height: 100%; background: var(--verde); border-right: 1.5px solid var(--negro); transition: width .3s; }
+
+  /* Días y tarjetas de foto */
+  .dia { display: grid; gap: .6rem; }
+  .dia h2 { font-size: 1.15rem; font-weight: 700; letter-spacing: -.02em; margin: 0; display: flex; align-items: baseline; gap: .6rem; }
+  .dia h2 span { font-size: .8rem; font-weight: 500; color: var(--tenue); }
+  .fila-fotos { display: grid; grid-template-columns: repeat(auto-fill, minmax(10.5rem, 1fr)); gap: .6rem; }
+  .tarjeta { text-align: left; background: var(--blanco); border: 1.5px solid var(--negro); border-radius: 1rem; padding: 0; overflow: hidden; cursor: pointer; display: grid; }
+  .tarjeta:hover { background: var(--verde); }
+  .mini-foto { aspect-ratio: 4 / 3; background: var(--fondo); border-bottom: 1.5px solid var(--negro); display: grid; place-items: center; overflow: hidden; }
+  .mini-foto img { width: 100%; height: 100%; object-fit: cover; }
+  .mini-foto .sin { font: .7rem var(--mono); color: var(--tenue); padding: .5rem; text-align: center; overflow-wrap: anywhere; }
+  .pie { padding: .55rem .7rem .65rem; display: grid; gap: .1rem; }
+  .pie .hora { font: 500 .8rem var(--mono); color: var(--tenue); }
+  .pie .comuna { font-size: 1.05rem; font-weight: 700; letter-spacing: -.02em; line-height: 1.15; }
+  .falta { background: var(--negro); color: var(--verde); border-radius: .3rem; padding: 0 .3rem; font-weight: 600; }
+
+  /* Ficha de una foto */
+  .velo { position: fixed; inset: 0; background: rgba(11, 11, 11, .6); display: grid; place-items: center; padding: 1rem; z-index: 20; }
+  .ficha { background: var(--blanco); border: 1.5px solid var(--negro); border-radius: var(--radio); width: min(64rem, 100%); max-height: calc(100vh - 2rem); overflow: auto; display: grid; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 52rem) { .ficha { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); } }
+  .ficha-foto { background: var(--fondo); display: grid; place-items: center; padding: 1rem; min-height: 16rem; }
+  .ficha-foto img { max-width: 100%; max-height: 70vh; border-radius: .5rem; }
+  .ficha-datos { padding: 1.25rem 1.5rem; display: grid; gap: 1.1rem; align-content: start; }
+  .ficha-nav { display: flex; gap: .5rem; align-items: center; }
+  .ficha-nav .cual { font: .8rem var(--mono); color: var(--tenue); margin-right: auto; overflow-wrap: anywhere; }
+  .rotulo { font-size: .72rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--tenue); }
+  .grande { font-size: clamp(1.8rem, 4vw, 2.5rem); font-weight: 700; letter-spacing: -.045em; line-height: 1; }
+  .sub { font-size: .85rem; color: var(--tenue); margin: 0; }
+  .mono { font: .85rem var(--mono); font-variant-numeric: tabular-nums; }
+  .mapa { display: grid; grid-template-columns: 7rem minmax(0, 1fr); gap: .9rem; align-items: center; }
+  .mapa svg { width: 7rem; height: 7rem; }
+  .mapa path { fill: var(--fondo); stroke: var(--negro); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+  .mapa .punto { fill: var(--negro); }
+  .mapa .halo { fill: var(--verde); stroke: var(--negro); stroke-width: 1; vector-effect: non-scaling-stroke; }
+  .mapa a { color: var(--negro); font-weight: 600; }
+  .bloque { display: grid; gap: .25rem; }
+  .canal { border-top: 1.5px solid var(--negro); padding-top: .9rem; font-size: .85rem; display: grid; gap: .2rem; }
+
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+  /* ---- Expediente imprimible ---- */
+  .exp-vista { position: fixed; inset: 0; z-index: 30; background: #d9d9d4; display: grid; grid-template-rows: auto 1fr; }
+  .exp-barra { display: flex; flex-wrap: wrap; gap: .5rem .75rem; align-items: center; padding: .75rem 1rem; background: var(--blanco); border-bottom: 1.5px solid var(--negro); }
+  .exp-barra b { margin-right: auto; font-size: 1.1rem; }
+  .exp-barra select, .exp-barra input[type=text] { font: 500 .85rem var(--mono); padding: .45rem .6rem; border: 1.5px solid var(--negro); border-radius: 999px; background: var(--blanco); }
+  .exp-barra input[type=text] { width: min(28rem, 100%); }
+  .exp-barra .aviso-sesion { flex-basis: 100%; font-size: .8rem; color: var(--tenue); margin: 0; }
+  .exp-hojas { overflow: auto; padding: 1.5rem; display: grid; justify-items: center; gap: 1.5rem; }
+  /* Hoja: lenguaje de ficha técnica (marco fino, marcas de registro, rótulos [ entre corchetes ], reglas)
+     y una sola imagen: la captura de la cámara. --acento se elige en la barra. */
+  .hoja { --acento: #c6f21c; --l: .3mm solid #000; position: relative; background: #fff; color: #000; width: var(--hoja-w); height: var(--hoja-h); padding: 9mm; box-shadow: 0 8px 30px rgba(0, 0, 0, .18); font: 400 7pt/1.3 "IBM Plex Mono", ui-monospace, monospace; text-transform: uppercase; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .hoja .marco { position: relative; height: 100%; border: var(--l); display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; }
+  .hoja.dos-cols .marco { grid-template-rows: auto minmax(0, 1fr) auto auto; }
+  .hoja .reg { position: absolute; width: 6mm; height: 6mm; margin: -3mm; z-index: 1; }
+  .hoja .reg.a { top: 0; left: 0; } .hoja .reg.b { top: 0; right: 0; } .hoja .reg.c { bottom: 0; left: 0; } .hoja .reg.d { bottom: 0; right: 0; }
+  .hoja .mas { position: absolute; font: 400 9pt/1 "IBM Plex Mono", monospace; margin: -.5em -.3em; }
+  .hoja .r { color: #000; opacity: .45; }
+  .hoja h2 { font: 500 6.6pt/1 "IBM Plex Mono", monospace; letter-spacing: .08em; margin: 0 0 2mm; display: flex; justify-content: space-between; gap: 2mm; }
+
+  .hoja .cab { padding: 2.5mm 5mm 3mm; border-bottom: var(--l); display: grid; gap: 2mm; }
+  .hoja .meta { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; gap: 4mm; padding-bottom: 2mm; border-bottom: .7mm solid var(--acento); }
+  .hoja .meta span:last-child { text-align: right; }
+  .hoja .ticks { width: 26mm; height: 2.2mm; background: repeating-linear-gradient(90deg, #000 0 .25mm, transparent .25mm 1.3mm); }
+  .hoja .titulo { display: flex; justify-content: space-between; align-items: baseline; gap: 6mm; }
+  .hoja .titulo h1, .hoja .titulo b { font: 500 30pt/.9 "Inter Tight", sans-serif; letter-spacing: -.045em; margin: 0; text-transform: uppercase; }
+
+  .hoja .principal { display: grid; grid-template-columns: 9mm minmax(0, 1fr) 54mm; border-bottom: var(--l); }
+  .hoja .regla { border-right: var(--l); display: grid; grid-template-rows: auto 1fr; justify-items: center; padding: 3mm 0; gap: 3mm; }
+  .hoja .iconos { display: grid; gap: 1.6mm; justify-items: center; }
+  .hoja .iconos svg { width: 4mm; height: 4mm; }
+  .hoja .escala { width: 4mm; justify-self: center; border-left: var(--l); background: repeating-linear-gradient(180deg, #000 0 .25mm, transparent .25mm 2mm) left / 1.4mm 100% no-repeat, repeating-linear-gradient(180deg, #000 0 .25mm, transparent .25mm 10mm) left / 3mm 100% no-repeat; }
+  .hoja .celda-foto { padding: 3mm 4mm 3mm; display: grid; gap: 1.5mm; align-content: start; }
+  .hoja .rotulos { display: flex; justify-content: space-between; gap: 3mm; }
+  .hoja .foto { position: relative; aspect-ratio: 4 / 5; overflow: hidden; border: var(--l); background: #eee; }
+  .hoja .foto img { position: absolute; max-width: none; }
+  .hoja .foto.bn img, .hoja .plano.bn img { filter: grayscale(1); }
+  .hoja .foto.contraste img, .hoja .plano.contraste img { filter: grayscale(1) contrast(1.7) brightness(1.05); }
+  .hoja .mira { position: absolute; border: .45mm solid var(--acento); outline: .2mm solid rgba(0, 0, 0, .55); }
+  .hoja .mira::before, .hoja .mira::after { content: ""; position: absolute; left: 50%; top: 50%; background: var(--acento); }
+  .hoja .mira::before { width: 4mm; height: .35mm; margin: -.17mm 0 0 -2mm; }
+  .hoja .mira::after { width: .35mm; height: 4mm; margin: -2mm 0 0 -.17mm; }
+  .hoja .mira span { position: absolute; left: -.45mm; bottom: 100%; margin-bottom: .6mm; background: var(--acento); color: #000; padding: .3mm 1mm; white-space: nowrap; font-size: 6pt; }
+  .hoja .sin-foto { position: absolute; inset: 0; display: grid; place-items: center; background: #fff; }
+  .hoja .sin-foto svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .hoja .sin-foto b { position: relative; background: #fff; padding: 1mm 2mm; border: var(--l); font-weight: 500; }
+  .hoja .coord { display: grid; grid-template-columns: auto auto 1fr auto; gap: 4mm; }
+  .hoja .coord span:last-child { text-align: right; }
+
+  .hoja .lado { border-left: var(--l); display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
+  .hoja .lado > div { border-bottom: var(--l); padding: 3mm; display: grid; gap: 1.5mm; }
+  .hoja .lado > div:last-child { border-bottom: 0; }
+  .hoja .plano { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border: var(--l); background: #eee; }
+  .hoja .plano img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .hoja .plano i { position: absolute; border: .3mm solid var(--acento); outline: .15mm solid #000; }
+  .hoja .equis { padding: 0 !important; height: 24mm; }
+  .hoja .equis svg { width: 100%; height: 100%; display: block; }
+  .hoja .vertical { display: flex !important; justify-content: center; gap: 2mm; overflow: hidden; }
+  .hoja .vertical p { writing-mode: vertical-rl; transform: rotate(180deg); margin: 0; line-height: 1.25; }
+
+  .hoja .datos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .hoja .datos > section { padding: 3mm 4mm; min-width: 0; }
+  .hoja .datos > section + section { border-left: var(--l); }
+  .hoja .kv { display: flex; align-items: baseline; gap: 1.2mm; padding: .35mm 0; }
+  .hoja .kv i { flex: 1; border-bottom: .25mm dotted #000; transform: translateY(-.6mm); min-width: 2mm; }
+  .hoja .kv b { font-weight: 500; white-space: nowrap; }
+  .hoja .medidor { display: grid; gap: .5mm; margin-bottom: 1.6mm; }
+  .hoja .medidor .m { display: block; height: 2.6mm; border: var(--l); background: #fff; }
+  .hoja .medidor .m i { display: block; height: 100%; background: var(--acento); border-right: var(--l); }
+  .hoja .cruz { display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 6.2mm); gap: .6mm; margin-bottom: 2mm; }
+  .hoja .cruz span { border: var(--l); display: grid; place-items: center; font-size: 6.3pt; }
+  .hoja .cruz span.v { border: 0; }
+
+  .hoja .clasif { border-top: var(--l); }
+  .hoja .clasif h2 { padding: 2.5mm 4mm 0; }
+  .hoja .clasif .valores { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-top: var(--l); }
+  .hoja .clasif .valores div { padding: 2mm 3mm 2.5mm; display: grid; gap: 1mm; min-width: 0; }
+  .hoja .clasif .valores div + div { border-left: var(--l); }
+  .hoja .clasif .valores div:first-child { background: var(--acento); }
+  .hoja .clasif .valores b { font: 600 14pt/1 "Inter Tight", sans-serif; letter-spacing: -.03em; overflow-wrap: anywhere; }
+
+  .hoja .pie { border-top: var(--l); display: flex; justify-content: space-between; align-items: center; gap: 4mm; padding: 2mm 4mm; }
+  .hoja .pie b { font-weight: 500; display: flex; align-items: center; gap: 1.5mm; white-space: nowrap; }
+  .hoja .pie b::before { content: ""; width: 2.4mm; height: 2.4mm; background: var(--acento); border: var(--l); }
+
+  /* Hoja 2: recorrido */
+  .hoja .recorrido { display: grid; grid-template-columns: minmax(0, 1fr) 66mm; border-bottom: var(--l); min-height: 0; }
+  .hoja .semana { padding: 3mm 4mm 4mm; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .hoja .parada { display: grid; grid-template-columns: 8mm 21mm 11mm minmax(0, 1fr); align-items: baseline; gap: 2mm; border-bottom: var(--l); padding: 3mm 0 2mm; }
+  .hoja .parada .c { font: 600 22pt/1 "Inter Tight", sans-serif; letter-spacing: -.04em; overflow-wrap: anywhere; }
+  .hoja .parada .n { display: inline-grid; place-items: center; width: 4mm; height: 4mm; border-radius: 50%; background: #000; color: #fff; font-size: 6pt; margin-left: 2mm; vertical-align: middle; transform: translateY(-.6mm); }
+  .hoja .parada.sin .c { font-size: 10pt; font-weight: 500; opacity: .5; }
+  .hoja .parada.prob .c { opacity: .55; font-style: italic; }
+  .hoja .semana.varias .parada { padding: 1.6mm 0 1.2mm; }
+  .hoja .semana.varias .parada .c { font-size: 16pt; }
+  .hoja .semana.muchas .parada { padding: .9mm 0 .6mm; }
+  .hoja .semana.muchas .parada .c { font-size: 11pt; }
+  .hoja .secuencia { font: 600 10pt/1.3 "Inter Tight", sans-serif; margin: auto 0 0; padding-top: 3mm; border-top: .7mm solid var(--acento); }
+  .hoja .mapa-ruta { aspect-ratio: 1; border: var(--l); background: #fff; }
+  .hoja .mapa-ruta svg { width: 100%; height: 100%; display: block; }
+  .hoja .mapa-ruta .otra { fill: #fff; stroke: #000; stroke-width: .3; stroke-opacity: .35; vector-effect: non-scaling-stroke; }
+  .hoja .mapa-ruta .visitada { fill: var(--acento); stroke: #000; stroke-width: .8; vector-effect: non-scaling-stroke; }
+  .hoja .mapa-ruta .linea { fill: none; stroke: #000; stroke-width: 1.1; stroke-dasharray: 3 2; vector-effect: non-scaling-stroke; }
+  .hoja .mapa-ruta circle { fill: #000; }
+  .hoja .mapa-ruta text { fill: #fff; font: 500 3.2px "IBM Plex Mono", monospace; text-anchor: middle; dominant-baseline: central; }
+  .hoja .cierre { padding: 4mm 5mm 4mm; display: grid; gap: 2.5mm; }
+  .hoja .cierre .barra-ac { height: 2.6mm; background: var(--acento); border: var(--l); }
+  .hoja .final { font: 600 26pt/1 "Inter Tight", sans-serif; letter-spacing: -.04em; margin: 0; text-transform: none; }
+  .hoja .nota { margin: 0; opacity: .6; }
+
+  @media print {
+    html, body { background: #fff !important; display: block !important; margin: 0 !important; min-height: 0 !important; height: auto !important; }
+    body > *:not(.exp-vista) { display: none !important; }
+    .exp-vista { position: static; display: block; background: none; }
+    .exp-barra { display: none !important; }
+    .exp-hojas { display: block; padding: 0; overflow: visible; }
+    .hoja { box-shadow: none; height: calc(var(--hoja-h) - .6mm); overflow: hidden; break-after: page; }
+    .hoja:last-child { break-after: auto; }
+  }
+</style>
+</head>
+<body>
+<header class="barra">
+  <span class="marca"><b>rastro</b> <span>visor</span></span>
+  <input id="clave" type="password" placeholder="Clave del visor" autocomplete="off" aria-label="Clave del visor">
+  <button class="btn" id="actualizar">Cargar planilla</button>
+  <label class="btn sec" for="archivos">Fotos del computador</label>
+  <input id="archivos" type="file" accept="image/*,.heic,.heif" multiple>
+  <button class="btn sec" id="exportarTodo" disabled>Exportar todo .txt</button>
+  <button class="btn sec" id="olvidar">Borrar fotos guardadas</button>
+  <button class="btn sec" id="muestra">Expediente de muestra</button>
+  <p class="estado" id="estado">Escribe la clave y toca "Cargar planilla". Las fotos se leen en este navegador.</p>
+</header>
+
+<div class="cuerpo">
+  <nav class="lateral" aria-label="Participantes">
+    <h2>Participantes</h2>
+    <div id="lista" style="display:grid;gap:.5rem"><p class="vacio">Todavía no hay datos cargados.</p></div>
+  </nav>
+
+  <main class="principal" id="principal">
+    <div class="bienvenida">
+      <h1>Elige un participante</h1>
+      <p>Cada participante muestra su recorrido: las fotos ordenadas por día, con la hora y la comuna. Toca una foto para ver su ficha completa.</p>
+    </div>
+  </main>
+</div>
+
+<div class="exp-vista" id="expVista" hidden>
+  <div class="exp-barra">
+    <b>Expediente <span id="expCodigo"></span></b>
+    <label class="btn sec" for="expSesion">Cargar sesión (.json)</label>
+    <input id="expSesion" type="file" accept=".json,application/json" hidden>
+    <label class="btn sec" for="expCaptura">Cambiar foto</label>
+    <input id="expCaptura" type="file" accept="image/*" hidden>
+    <select id="expPapel" aria-label="Papel"><option value="carta">Carta</option><option value="a4">A4</option></select>
+    <select id="expAcento" aria-label="Color de acento"><option value="#c6f21c">Acento verde</option><option value="#e8432e">Acento rojo</option><option value="#000000">Sin acento</option></select>
+    <select id="expTrato" aria-label="Foto"><option value="">Foto a color</option><option value="bn">Foto b/n</option><option value="contraste">Foto b/n contraste</option></select>
+    <input id="expFrase" type="text" aria-label="Frase final" placeholder="Frase final">
+    <button class="btn" id="expImprimir">Imprimir</button>
+    <button class="btn sec" id="expCerrar">Cerrar</button>
+    <p class="aviso-sesion" id="expAviso"></p>
+  </div>
+  <div class="exp-hojas" id="expHojas"></div>
+</div>
+<style id="expPagina"></style>
+
+<div class="velo" id="velo" hidden>
+  <div class="ficha" role="dialog" aria-modal="true" aria-label="Ficha de la foto" id="ficha"></div>
+</div>
+
+<script>
+  // URL de la aplicación web de Apps Script (la misma de la página de subida, termina en /exec)
+  const API = 'https://script.google.com/macros/s/ID_DE_LA_APLICACION/exec';
+  const EN_PARALELO = 3;
+
+  const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+  const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const dosDig = n => String(n).padStart(2, '0');
+
+  let comunas = null;
+  const grupos = new Map();      // clave → { clave, filas, fotos, cargado, cargando, progreso }
+  const fotoPorId = new Map();   // id de Drive → foto ya leída (para no leerla dos veces)
+  let grupoActual = null;
+  let fichaIdx = -1;
+
+  function avisar(texto, error = false) {
+    $('estado').textContent = texto;
+    $('estado').classList.toggle('error', error);
+  }
+  const guardarPref = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
+  const leerPref = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+  $('clave').value = leerPref('rastro-clave-visor');
+
+  // ---- Comunas: polígonos de la BCN (comunas.json), cruce punto-polígono en el navegador ----
+  async function cargarComunas() {
+    try {
+      const geo = await (await fetch('comunas.json')).json();
+      comunas = geo.features.map(f => {
+        const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+        let minX = 180, minY = 90, maxX = -180, maxY = -90;
+        polys.forEach(p => p[0].forEach(([x, y]) => { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }));
+        return { ...f.properties, polys, caja: [minX, minY, maxX, maxY] };
+      });
+    } catch (e) {
+      comunas = [];
+      avisar('No se pudo cargar comunas.json. Abre este archivo con Live Server desde la carpeta metadatos/.', true);
+    }
+    fotoPorId.forEach(f => { f.comuna = buscarComuna(f); });
+    grupos.forEach(g => { g.fotos.forEach(f => { f.comuna = buscarComuna(f); }); estimarComunas(g.fotos); });
+    pintarTodo();
+  }
+
+  function enAnillo(x, y, r) {
+    let dentro = false;
+    for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+      const [xi, yi] = r[i], [xj, yj] = r[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) dentro = !dentro;
+    }
+    return dentro;
+  }
+
+  function buscarComuna(f) {
+    if (f.lat == null || !comunas) return null;
+    const x = f.lon, y = f.lat;
+    return comunas.find(c => x >= c.caja[0] && x <= c.caja[2] && y >= c.caja[1] && y <= c.caja[3] &&
+      c.polys.some(p => enAnillo(x, y, p[0]) && !p.slice(1).some(h => enAnillo(x, y, h)))) || false;
+  }
+
+  function mapaSVG(c, lat, lon) {
+    const k = Math.cos(c.caja[1] * Math.PI / 180);
+    const [x0, y0, x1, y1] = c.caja;
+    const w = (x1 - x0) * k, h = y1 - y0, lado = Math.max(w, h) * 1.08;
+    const px = x => ((x - x0) * k + (lado - w) / 2) / lado * 100;
+    const py = y => ((y1 - y) + (lado - h) / 2) / lado * 100;
+    const d = c.polys.map(p => p.map(r => 'M' + r.map(([x, y]) => px(x).toFixed(2) + ' ' + py(y).toFixed(2)).join('L') + 'Z').join('')).join('');
+    const cx = px(lon).toFixed(2), cy = py(lat).toFixed(2);
+    return `<svg viewBox="0 0 100 100" role="img" aria-label="Contorno de ${esc(c.comuna)} con el punto de la foto"><path d="${d}" fill-rule="evenodd"/><circle class="halo" cx="${cx}" cy="${cy}" r="6"/><circle class="punto" cx="${cx}" cy="${cy}" r="2.2"/></svg>`;
+  }
+
+  function partesFecha(s) {
+    const m = s && String(s).match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2})/);
+    if (!m) return null;
+    const [, y, mo, d, hh, mm] = m.map(Number);
+    return { y, mo, d, hh, mm, dia: DIAS[new Date(y, mo - 1, d).getDay()] };
+  }
+  const comunaTxt = f => f.fallo ? 'no se pudo descargar' : f.comuna ? f.comuna.comuna : f.gps ? 'fuera de las comunas' : f.probable ? `≈ ${f.probable.comuna.comuna} (probable)` : 'sin ubicación';
+
+  // ---- Comuna probable para fotos sin GPS ----
+  // Una foto sin ubicación toma la comuna de la foto con GPS más cercana en el tiempo, del mismo día
+  // y a no más de VENTANA_MIN minutos (como el geotag de ExifTool, pero sin inventar coordenadas).
+  // Es una estimación: se muestra con «≈» y no cuenta en las comunas, la ruta ni «con ubicación».
+  const VENTANA_MIN = 180;
+  const minutosDe = q => Date.UTC(q.y, q.mo - 1, q.d, q.hh, q.mm) / 60000;
+  function estimarComunas(fotos) {
+    const conComuna = fotos.map(f => ({ f, q: partesFecha(f.fecha) })).filter(x => x.f.comuna && x.q);
+    fotos.forEach(f => {
+      delete f.probable;
+      const q = partesFecha(f.fecha);
+      if (f.comuna || f.gps || f.fallo || !q) return;
+      let mejor = null;
+      for (const x of conComuna) {
+        if (x.q.y !== q.y || x.q.mo !== q.mo || x.q.d !== q.d) continue;
+        const min = minutosDe(x.q) - minutosDe(q);
+        if (Math.abs(min) <= VENTANA_MIN && (!mejor || Math.abs(min) < Math.abs(mejor.minutos))) mejor = { comuna: x.f.comuna, minutos: min };
+      }
+      if (mejor) f.probable = mejor;
+    });
+  }
+  // "foto tomada 40 min después" (desde la foto sin GPS hacia la que sí tiene)
+  const distanciaTxt = m => `${Math.abs(m) < 60 ? `${Math.abs(m)} min` : `${Math.floor(Math.abs(m) / 60)} h ${Math.abs(m) % 60 ? `${Math.abs(m) % 60} min` : ''}`.trim()} ${m >= 0 ? 'después' : 'antes'}`;
+
+  // ---- Lectura de metadatos (de un File o un Blob) ----
+  async function leer(blob, nombre, extra = {}) {
+    let exif = null, gps = null;
+    try { exif = await exifr.parse(blob, { tiff: true, exif: true, gps: true, xmp: true, icc: false, iptc: true, reviveValues: false }); } catch (e) {}
+    try { gps = await exifr.gps(blob); } catch (e) {}
+    const f = {
+      nombre, url: URL.createObjectURL(blob), ...extra, meta: exif || {},
+      lat: gps && typeof gps.latitude === 'number' ? gps.latitude : null,
+      lon: gps && typeof gps.longitude === 'number' ? gps.longitude : null,
+      fecha: exif && exif.DateTimeOriginal || null,
+      zona: exif && exif.OffsetTimeOriginal || null,
+      error: exif && typeof exif.GPSHPositioningError === 'number' ? exif.GPSHPositioningError : null,
+      modelo: exif && exif.Model ? `${exif.Make || ''} ${exif.Model}`.trim() : null,
+    };
+    f.gps = f.lat != null;
+    f.comuna = buscarComuna(f);
+    return f;
+  }
+
+  // ---- Fotos ya descargadas de Drive: se guardan en este navegador (IndexedDB) ----
+  const BD = new Promise(ok => {
+    try {
+      const r = indexedDB.open('rastro-visor', 1);
+      r.onupgradeneeded = () => r.result.createObjectStore('fotos');
+      r.onsuccess = () => ok(r.result);
+      r.onerror = () => ok(null);
+    } catch (e) { ok(null); }
+  });
+  async function bd(modo, accion) {
+    const db = await BD;
+    if (!db) return null;
+    return new Promise(ok => {
+      try {
+        const req = accion(db.transaction('fotos', modo).objectStore('fotos'));
+        req.onsuccess = () => ok(req.result ?? null);
+        req.onerror = () => ok(null);
+      } catch (e) { ok(null); }
+    });
+  }
+  const guardada = id => bd('readonly', s => s.get(id));
+  const guardar = (id, v) => bd('readwrite', s => s.put(v, id));
+  const borrarGuardadas = () => bd('readwrite', s => s.clear());
+
+  // ---- Apps Script ----
+  async function api(params) {
+    const url = API + '?' + new URLSearchParams({ ...params, clave: $('clave').value.trim() });
+    const j = await (await fetch(url)).json();
+    if (j.error) throw new Error(j.error);
+    return j;
+  }
+  function aBlob(b64, tipo) {
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: tipo || 'application/octet-stream' });
+  }
+
+  // ---- Grupos: un participante (Código P) o una prueba ----
+  function claveGrupo(fila) {
+    const p = String(fila['Código P'] || '').trim().toUpperCase();
+    return p || 'canal-' + (fila['Teléfono'] || 'otro');
+  }
+  function etiqueta(clave) {
+    if (clave.startsWith('canal-')) return { titulo: 'Prueba de canal', sub: clave.slice(6) };
+    if (clave === 'PRUEBA') return { titulo: 'PRUEBA', sub: 'prueba de la página de fotos' };
+    if (clave === 'computador') return { titulo: 'Computador', sub: 'fotos de este equipo' };
+    if (clave === 'MUESTRA') return { titulo: 'P0', sub: 'muestra para diseñar' };
+    if (/^SR\d+$/.test(clave)) return { titulo: clave, sub: 'sin registro' };
+    return { titulo: clave, sub: 'participante' };
+  }
+  function ordenGrupos(a, b) {
+    const pa = /^P\d+$/.test(a), pb = /^P\d+$/.test(b);
+    if (pa && pb) return Number(a.slice(1)) - Number(b.slice(1));
+    if (pa !== pb) return pa ? -1 : 1;
+    return a.localeCompare(b);
+  }
+
+  async function cargarPlanilla() {
+    const clave = $('clave').value.trim();
+    if (!clave) return avisar('Escribe la clave del visor. Se crea con crearClaveVisor en Apps Script.', true);
+    guardarPref('rastro-clave-visor', clave);
+    $('actualizar').disabled = true;
+    avisar('Leyendo la planilla…');
+    try {
+      const { filas } = await api({ accion: 'lista' });
+      const nuevos = new Map();
+      filas.forEach(fila => {
+        const k = claveGrupo(fila);
+        if (!nuevos.has(k)) nuevos.set(k, []);
+        nuevos.get(k).push(fila);
+      });
+      // Conserva lo ya leído; un grupo con fotos nuevas se vuelve a armar al abrirlo
+      for (const [k, filasG] of nuevos) {
+        const previo = grupos.get(k);
+        const igual = previo && previo.cargado && previo.filas.length === filasG.length;
+        grupos.set(k, igual ? { ...previo, filas: filasG } : { clave: k, filas: filasG, fotos: [], cargado: false, cargando: false, progreso: 0 });
+      }
+      for (const k of [...grupos.keys()]) if (!nuevos.has(k) && k !== 'computador') grupos.delete(k);
+      const personas = [...nuevos.keys()].filter(k => /^P\d+$/.test(k)).length;
+      avisar(`${filas.length} fotos en la planilla · ${personas} participante${personas === 1 ? '' : 's'}.`);
+      $('exportarTodo').disabled = false;
+      if (!grupoActual || !grupos.has(grupoActual)) {
+        const previo = leerPref('rastro-grupo');
+        if (grupos.has(previo)) seleccionar(previo);
+      } else if (!grupos.get(grupoActual).cargado) {
+        seleccionar(grupoActual);
+      }
+      pintarTodo();
+    } catch (err) {
+      avisar(`No se pudo leer la planilla: ${err.message}`, true);
+    } finally {
+      $('actualizar').disabled = false;
+    }
+  }
+
+  // Descarga (o saca del caché) las fotos de un grupo y las lee
+  // Si el grupo ya se está cargando, devuelve esa misma carga (así quien la pida puede esperarla)
+  function cargarGrupo(k) {
+    const g = grupos.get(k);
+    if (!g || g.cargado) return Promise.resolve();
+    if (!g.promesa) g.promesa = cargarGrupoAhora(k).finally(() => { g.promesa = null; });
+    return g.promesa;
+  }
+
+  async function cargarGrupoAhora(k) {
+    const g = grupos.get(k);
+    if (!g || g.cargado) return;
+    g.cargando = true;
+    g.progreso = 0;
+    pintarTodo();
+    const res = new Array(g.filas.length);
+    let sig = 0;
+    async function trabajador() {
+      while (sig < g.filas.length) {
+        const i = sig++;
+        const fila = g.filas[i];
+        try {
+          let f = fotoPorId.get(fila.id);
+          if (!f) {
+            let guardado = await guardada(fila.id);
+            if (!guardado) {
+              const a = await api({ accion: 'foto', id: fila.id });
+              guardado = { nombre: a.nombre, blob: aBlob(a.datos, a.tipo) };
+              await guardar(fila.id, guardado);
+            }
+            f = await leer(guardado.blob, guardado.nombre, { id: fila.id });
+            fotoPorId.set(fila.id, f);
+          }
+          f.fila = fila;
+          res[i] = f;
+        } catch (err) {
+          res[i] = { id: fila.id, nombre: fila['Archivo'] || fila.id, fila, url: null, gps: false, lat: null, lon: null, fecha: null, comuna: null, meta: {}, fallo: err.message };
+        }
+        g.progreso++;
+        if (grupoActual === k) pintarPrincipal();
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(EN_PARALELO, g.filas.length) }, trabajador));
+    g.fotos = res;
+    estimarComunas(g.fotos);
+    g.cargado = true;
+    g.cargando = false;
+    pintarTodo();
+  }
+
+  function seleccionar(k) {
+    grupoActual = k;
+    guardarPref('rastro-grupo', k);
+    pintarTodo();
+    cargarGrupo(k);
+    $('principal').scrollTop = 0;
+    window.scrollTo(0, 0);
+  }
+
+  // ---- Fotos del computador: van a su propio grupo ----
+  $('archivos').addEventListener('change', async e => {
+    const lista = [...e.target.files];
+    e.target.value = '';
+    if (!lista.length) return;
+    const g = grupos.get('computador') || { clave: 'computador', filas: [], fotos: [], cargado: true, cargando: false };
+    for (const [i, file] of lista.entries()) {
+      avisar(`Leyendo ${i + 1} de ${lista.length}…`);
+      g.fotos.push(await leer(file, file.name));
+    }
+    estimarComunas(g.fotos);
+    grupos.set('computador', g);
+    avisar(`${lista.length} foto(s) del computador agregadas.`);
+    $('exportarTodo').disabled = false;
+    seleccionar('computador');
+  });
+
+  // ---- Pintar ----
+  function ordenadas(fotos) {
+    return [...fotos].sort((a, b) => (a.fecha || '9').localeCompare(b.fecha || '9'));
+  }
+
+  function resumen(g) {
+    const fotos = g.cargado ? g.fotos : [];
+    const conGps = fotos.filter(f => f.gps).length;
+    const dias = new Set(fotos.map(f => (f.fecha || '').slice(0, 10)).filter(Boolean)).size;
+    const nombres = [...new Set(fotos.filter(f => f.comuna).map(f => f.comuna.comuna))];
+    const ruta = [];
+    ordenadas(fotos).forEach(f => { const c = f.comuna && f.comuna.comuna; if (c && ruta[ruta.length - 1] !== c) ruta.push(c); });
+    return { total: g.cargado ? fotos.length : g.filas.length, conGps, dias, comunas: nombres, ruta };
+  }
+
+  function pintarLista() {
+    const claves = [...grupos.keys()].sort(ordenGrupos);
+    if (!claves.length) { $('lista').innerHTML = '<p class="vacio">Todavía no hay datos cargados.</p>'; return; }
+    $('lista').innerHTML = claves.map(k => {
+      const g = grupos.get(k), e = etiqueta(k), r = resumen(g);
+      const fotos = `${r.total} foto${r.total === 1 ? '' : 's'}`;
+      const detalle = g.cargado
+        ? `${fotos} · ${r.conGps} con ubicación · ${r.comunas.length} comuna${r.comunas.length === 1 ? '' : 's'}`
+        : `${fotos} · ${g.filas.filter(f => String(f['GPS en teléfono']).toLowerCase() === 'sí').length} con GPS al subir`;
+      return `<button class="grupo" data-k="${esc(k)}" aria-current="${k === grupoActual}">
+        <b>${esc(e.titulo)}</b><span>${esc(e.sub)}</span><span>${detalle}</span></button>`;
+    }).join('');
+  }
+
+  function pintarPrincipal() {
+    const g = grupos.get(grupoActual);
+    if (!g) return;
+    const e = etiqueta(grupoActual);
+    if (!g.cargado) {
+      const pct = g.filas.length ? Math.round(g.progreso / g.filas.length * 100) : 0;
+      $('principal').innerHTML = `<div class="cabecera"><div class="arriba"><h1>${esc(e.titulo)}<small>${esc(e.sub)}</small></h1></div></div>
+        <div class="cargando"><div class="barra-progreso"><i style="width:${pct}%"></i></div>
+        <p class="sub">Preparando ${g.progreso} de ${g.filas.length} fotos. Las que ya se descargaron antes salen del caché de este navegador.</p></div>`;
+      return;
+    }
+    const r = resumen(g);
+    const lista = ordenadas(g.fotos);
+    g.orden = lista;
+
+    // Agrupa por día de captura
+    const porDia = new Map();
+    lista.forEach((f, i) => {
+      const k = f.fecha ? f.fecha.slice(0, 10) : 'sin';
+      if (!porDia.has(k)) porDia.set(k, []);
+      porDia.get(k).push({ f, i });
+    });
+
+    const ruta = r.ruta.length
+      ? r.ruta.map(c => `<span>${esc(c)}</span>`).join('<b class="sep">→</b>')
+      : '<span>Sin ubicaciones</span>';
+
+    const dias = [...porDia].map(([k, items]) => {
+      const q = items[0].f.fecha ? partesFecha(items[0].f.fecha) : null;
+      const titulo = q ? `${q.dia} ${q.d} de ${MESES[q.mo - 1]}` : 'Sin fecha de captura';
+      const comunasDia = [...new Set(items.filter(x => x.f.comuna).map(x => x.f.comuna.comuna))].join(', ');
+      return `<section class="dia">
+        <h2>${titulo}<span>${items.length} foto${items.length === 1 ? '' : 's'}${comunasDia ? ' · ' + esc(comunasDia) : ''}</span></h2>
+        <div class="fila-fotos">${items.map(({ f, i }) => {
+          const p = partesFecha(f.fecha);
+          return `<button class="tarjeta" data-i="${i}">
+            <div class="mini-foto">${f.url ? `<img src="${f.url}" alt="" loading="lazy" onerror="this.outerHTML='<span class=&quot;sin&quot;>${esc(f.nombre)}</span>'">` : `<span class="sin">${esc(f.nombre)}</span>`}</div>
+            <div class="pie"><span class="hora">${p ? `${dosDig(p.hh)}:${dosDig(p.mm)}` : 'sin hora'}</span>
+            <span class="comuna">${f.comuna ? esc(f.comuna.comuna) : f.probable ? `≈ ${esc(f.probable.comuna.comuna)} <span class="falta">probable</span>` : `<span class="falta">${esc(comunaTxt(f))}</span>`}</span></div>
+          </button>`;
+        }).join('')}</div>
+      </section>`;
+    }).join('');
+
+    $('principal').innerHTML = `
+      <div class="cabecera">
+        <div class="arriba">
+          <h1>${esc(e.titulo)}<small>${esc(e.sub)}</small></h1>
+          <span style="display:flex;gap:.5rem;flex-wrap:wrap">
+            <button class="btn" id="abrirExpediente">Expediente</button>
+            <button class="btn" id="exportarGrupo">Exportar .txt</button>
+          </span>
+        </div>
+        <div class="ruta">${ruta}</div>
+        <div class="cifras">
+          <div class="cifra"><b>${r.total}</b><span>fotos</span></div>
+          <div class="cifra"><b class="${r.conGps < r.total ? 'alerta' : ''}">${r.conGps}/${r.total}</b><span>con ubicación</span></div>
+          <div class="cifra"><b>${r.dias}</b><span>días</span></div>
+          <div class="cifra"><b>${r.comunas.length}</b><span>comunas</span></div>
+        </div>
+      </div>
+      ${dias || '<p class="sub">Este grupo no tiene fotos.</p>'}`;
+    $('exportarGrupo').addEventListener('click', () => descargar(textoExport([g]), `rastro-${grupoActual.toLowerCase()}`));
+    $('abrirExpediente').addEventListener('click', () => abrirExpediente(grupoActual));
+  }
+
+  function pintarTodo() {
+    pintarLista();
+    if (grupoActual) pintarPrincipal();
+    if (!$('velo').hidden) pintarFicha();
+  }
+
+  // ---- Ficha de una foto ----
+  function abrirFicha(i) {
+    fichaIdx = i;
+    $('velo').hidden = false;
+    pintarFicha();
+  }
+  function cerrarFicha() { $('velo').hidden = true; fichaIdx = -1; }
+
+  function pintarFicha() {
+    const g = grupos.get(grupoActual);
+    const lista = g && g.orden;
+    if (!lista || !lista[fichaIdx]) return cerrarFicha();
+    const f = lista[fichaIdx];
+
+    let ubic;
+    if (f.fallo) ubic = `<div class="grande">Sin datos</div><p class="sub">No se pudo descargar: ${esc(f.fallo)}</p>`;
+    else if (!f.gps && f.probable) ubic = `<div class="grande">≈ ${esc(f.probable.comuna.comuna)}</div><p class="sub">Comuna probable. La foto no trae GPS; se estima con la foto con ubicación más cercana del mismo día, tomada ${esc(distanciaTxt(f.probable.minutos))}.</p>`;
+    else if (!f.gps) ubic = `<div class="grande"><span class="falta">Sin ubicación</span></div><p class="sub">La foto no trae coordenadas GPS${partesFecha(f.fecha) ? ' y no hay otra foto con ubicación ese día a menos de 3 horas' : ''}.</p>`;
+    else if (!comunas) ubic = `<div class="grande">…</div><p class="sub">Cargando el mapa de comunas.</p>`;
+    else if (!f.comuna) ubic = `<div class="grande"><span class="falta">Fuera de las comunas</span></div><p class="sub">Tiene coordenadas, pero no caen dentro de ninguna comuna de Chile.</p>`;
+    else ubic = `<div class="grande">${esc(f.comuna.comuna)}</div>
+      <p class="sub">${esc(f.comuna.provincia)} · ${esc(f.comuna.region)}</p>
+      <div class="mapa">${mapaSVG(f.comuna, f.lat, f.lon)}
+        <div style="display:grid;gap:.25rem;min-width:0">
+          <span class="mono">${f.lat.toFixed(6)}, ${f.lon.toFixed(6)}</span>
+          ${f.error != null ? `<span class="sub">Margen de error ± ${Math.round(f.error)} m</span>` : ''}
+          <a href="https://www.google.com/maps?q=${f.lat.toFixed(7)},${f.lon.toFixed(7)}" target="_blank" rel="noopener">Ver en Google Maps ↗</a>
+        </div></div>`;
+
+    const p = partesFecha(f.fecha);
+    const cuando = p
+      ? `<div class="grande">${p.dia} ${p.d} de ${MESES[p.mo - 1]}</div><p class="sub"><span class="mono">${dosDig(p.hh)}:${dosDig(p.mm)}</span> · ${p.y}${f.zona ? ` · zona horaria ${esc(f.zona)}` : ''}</p>`
+      : `<div class="grande"><span class="falta">Sin fecha</span></div>`;
+
+    let canal = '';
+    if (f.fila) {
+      const enTel = String(f.fila['GPS en teléfono']).toLowerCase() === 'sí';
+      const diag = f.fallo ? '' : enTel && !f.gps ? 'Se perdió al subir o en Drive.' : !enTel && !f.gps ? 'Ya venía sin ubicación desde el teléfono.' : enTel && f.gps ? 'Se conservó de punta a punta.' : '';
+      canal = `<div class="canal"><span class="rotulo">Subida</span>
+        <span>${esc(f.fila['Teléfono'] || '—')} · ${f.fila['Subida'] ? new Date(f.fila['Subida']).toLocaleString('es-CL') : ''}</span>
+        <span>GPS en el teléfono: <b>${enTel ? 'sí' : 'no'}</b> → en Drive: <b>${f.gps ? 'sí' : 'no'}</b>${diag ? ` · ${diag}` : ''}</span>
+        ${f.modelo ? `<span>${esc(f.modelo)}</span>` : ''}</div>`;
+    }
+
+    $('ficha').innerHTML = `
+      <div class="ficha-foto">${f.url ? `<img src="${f.url}" alt="${esc(f.nombre)}" onerror="this.outerHTML='<p class=&quot;sub&quot;>Este navegador no muestra fotos HEIC. Los datos se leen igual.</p>'">` : '<p class="sub">Sin imagen</p>'}</div>
+      <div class="ficha-datos">
+        <div class="ficha-nav">
+          <span class="cual">${esc(f.nombre)} · ${fichaIdx + 1} de ${lista.length}</span>
+          <button class="btn sec" id="fAnt" ${fichaIdx === 0 ? 'disabled' : ''} aria-label="Foto anterior">←</button>
+          <button class="btn sec" id="fSig" ${fichaIdx === lista.length - 1 ? 'disabled' : ''} aria-label="Foto siguiente">→</button>
+          <button class="btn" id="fCerrar" aria-label="Cerrar">×</button>
+        </div>
+        <div class="bloque"><span class="rotulo">Dónde</span>${ubic}</div>
+        <div class="bloque"><span class="rotulo">Cuándo</span>${cuando}</div>
+        ${canal}
+      </div>`;
+    $('fAnt').onclick = () => { fichaIdx--; pintarFicha(); };
+    $('fSig').onclick = () => { fichaIdx++; pintarFicha(); };
+    $('fCerrar').onclick = cerrarFicha;
+  }
+
+  // ---- Exportar ----
+  function valorTxt(v) {
+    if (v == null) return '';
+    if (Array.isArray(v) || ArrayBuffer.isView(v)) {
+      const arr = Array.from(v);
+      return arr.length > 24 ? `[${arr.length} valores]` : arr.join(', ');
+    }
+    if (typeof v === 'object') return JSON.stringify(v).slice(0, 300);
+    return String(v).replace(/\s+/g, ' ').slice(0, 300);
+  }
+
+  function textoExport(lista) {
+    const fechaTxt = x => { const q = partesFecha(x.fecha); return q ? `${q.dia} ${q.d} de ${MESES[q.mo - 1]} de ${q.y}, ${dosDig(q.hh)}:${dosDig(q.mm)}` : 'sin fecha'; };
+    const L = ['rastro · visor · exportación', `Generado: ${new Date().toLocaleString('es-CL')}`, 'Comunas: polígonos de la BCN. Coordenadas exactas incluidas.', ''];
+    lista.forEach(g => {
+      const e = etiqueta(g.clave), r = resumen(g), fotos = ordenadas(g.fotos);
+      L.push(`######## ${e.titulo} (${e.sub}) ########`);
+      L.push(`Fotos: ${r.total} · con ubicación: ${r.conGps} · días: ${r.dias} · comunas: ${r.comunas.length}`);
+      L.push(`Recorrido: ${r.ruta.join(' → ') || 'sin ubicaciones'}`);
+      L.push('');
+      L.push(['Fecha y hora', 'Comuna', 'Archivo'].join('\t'));
+      fotos.forEach(x => L.push([fechaTxt(x), comunaTxt(x), x.nombre].join('\t')));
+      fotos.forEach((x, i) => {
+        L.push('', `==== ${e.titulo} · ${i + 1}/${fotos.length} · ${x.nombre} ====`);
+        if (x.fila) {
+          L.push(`Teléfono: ${x.fila['Teléfono'] || '—'} · Subida: ${x.fila['Subida'] ? new Date(x.fila['Subida']).toLocaleString('es-CL') : '—'}`);
+          L.push(`GPS en el teléfono al subir: ${x.fila['GPS en teléfono']} · en el archivo: ${x.gps ? 'sí' : 'no'}`);
+          L.push(`Archivo en Drive: ${x.fila['Archivo en Drive'] || '—'}`);
+        }
+        if (x.fallo) { L.push(`Error: ${x.fallo}`); return; }
+        L.push(`Comuna: ${comunaTxt(x)}${x.comuna ? ` (${x.comuna.provincia}, ${x.comuna.region})` : ''}`);
+        L.push(`Coordenadas: ${x.gps ? `${x.lat.toFixed(7)}, ${x.lon.toFixed(7)}${x.error != null ? ` (± ${Math.round(x.error)} m)` : ''}` : '—'}`);
+        L.push(`Fecha y hora: ${fechaTxt(x)}${x.zona ? ` (${x.zona})` : ''}`);
+        L.push('-- Metadatos completos --');
+        const campos = Object.entries(x.meta || {}).filter(([k]) => k !== 'thumbnail');
+        if (!campos.length) L.push('(el archivo no trae metadatos legibles)');
+        campos.forEach(([k, v]) => L.push(`${k}: ${valorTxt(v)}`));
+      });
+      L.push('', '');
+    });
+    return L.join('\n');
+  }
+
+  function descargar(texto, base) {
+    const hoy = new Date();
+    const nombre = `${base}-${hoy.getFullYear()}-${dosDig(hoy.getMonth() + 1)}-${dosDig(hoy.getDate())}.txt`;
+    const url = URL.createObjectURL(new Blob([texto], { type: 'text/plain;charset=utf-8' }));
+    const a = Object.assign(document.createElement('a'), { href: url, download: nombre });
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    avisar(`Descargado: ${nombre}. Incluye coordenadas exactas: guárdalo fuera del repo.`);
+  }
+
+  $('exportarTodo').addEventListener('click', async () => {
+    $('exportarTodo').disabled = true;
+    const claves = [...grupos.keys()].sort(ordenGrupos);
+    for (const [i, k] of claves.entries()) {
+      avisar(`Preparando ${etiqueta(k).titulo} (${i + 1} de ${claves.length})…`);
+      await cargarGrupo(k);
+    }
+    descargar(textoExport(claves.map(k => grupos.get(k))), 'rastro-todos');
+    $('exportarTodo').disabled = false;
+  });
+
+
+  // ---- Expediente imprimible ----
+  // Junta la sesión grabada en el prototipo (P1-sesion.json, de 2026-tres-analisis-paralelo/sesion.html)
+  // con las fotos del participante. Hoja 1: el cuerpo y su clasificación. Hoja 2: el recorrido (giro final).
+  const PAPELES = { carta: ['215.9mm', '279.4mm', 'letter'], a4: ['210mm', '297mm', 'A4'] };
+  const FRASE = { recorrido: 'No nos dijiste dónde estuviste. Tus fotos sí.', sinUbicacion: 'Tus fotos no dijeron dónde estabas. Pero sí cuándo.' };
+  const sesiones = {};
+  const capturas = {};   // foto cargada a mano con «Cambiar foto» (reemplaza la captura de la sesión)
+  let expGrupo = null;
+
+  // Sesiones que el grabador del prototipo entrega al servidor local (2026-tres-analisis-paralelo/servidor.js).
+  // Si el visor corre en otro computador, cambiar localhost por la dirección de ese equipo (ej: 192.168.1.20:8080).
+  const SERVIDOR_SESIONES = location.pathname.startsWith('/metadatos/') ? '/sesiones/' : 'http://localhost:8080/sesiones/';
+  let esperaSesion = null;              // revisión periódica mientras el expediente está abierto
+  let estadoServidor = { ok: true, ultimaOtra: null };
+
+  // Trae la sesión de este participante si es nueva; si no hay, anota la última grabada de otro código
+  async function revisarSesion(k) {
+    if (!/^P\d+$/.test(k)) return;
+    try {
+      const r = await fetch(SERVIDOR_SESIONES + encodeURIComponent(k), { cache: 'no-store' });
+      estadoServidor.ok = true;
+      if (r.ok) {
+        const se = await r.json();
+        estadoServidor.ultimaOtra = null;
+        if (!sesiones[k] || sesiones[k].inicio !== se.inicio) {
+          sesiones[k] = se;
+          guardarSesion(k, se);
+          if (expGrupo === k) pintarExpediente();
+        }
+        return;
+      }
+      if (!sesiones[k]) {
+        const lista = await (await fetch(SERVIDOR_SESIONES, { cache: 'no-store' })).json();
+        const otra = lista.find(x => x.codigo !== k && Date.now() - new Date(x.inicio).getTime() < 3 * 3600e3);
+        estadoServidor.ultimaOtra = otra || null;
+      }
+    } catch (e) {
+      estadoServidor.ok = false;
+    }
+    if (expGrupo === k) $('expAviso').innerHTML = avisoSesion(k);
+  }
+
+  // Usa la sesión grabada con otro código (si se olvidó cambiarlo en el grabador)
+  async function usarSesionDe(codigo) {
+    const se = await (await fetch(SERVIDOR_SESIONES + encodeURIComponent(codigo), { cache: 'no-store' })).json();
+    se.codigoGrabado = se.codigo;
+    sesiones[expGrupo] = se;
+    guardarSesion(expGrupo, se);
+    pintarExpediente();
+  }
+
+  function avisoSesion(k) {
+    const se = sesiones[k];
+    if (se) return esc(`Sesión cargada: ${etiqueta(k).titulo} · ${mmss(se.duracionSeg || 0)}${se.codigo !== etiqueta(k).titulo ? ` · grabada como ${se.codigo}` : ''}`);
+    if (!/^P\d+$/.test(k)) return 'Falta la sesión: carga el archivo .json que descargó el grabador del prototipo.';
+    if (!estadoServidor.ok) return `Falta la sesión de ${esc(k)}. No encuentro el servidor del prototipo (¿está abierta la Terminal con abrir-ventanas.sh?). También puedes usar «Cargar sesión (.json)».`;
+    const otra = estadoServidor.ultimaOtra;
+    return `Esperando la sesión de ${esc(k)}: se carga sola cuando la termines en el grabador.`
+      + (otra ? ` La última grabada es de <b>${esc(otra.codigo)}</b> (${mmss(otra.duracionSeg || 0)}). <button class="btn sec" data-usar="${esc(otra.codigo)}">Usar la de ${esc(otra.codigo)}</button>` : '');
+  }
+
+  const leerSesion = k => { try { return JSON.parse(localStorage.getItem(`rastro-sesion-${k}`) || 'null'); } catch (e) { return null; } };
+  const guardarSesion = (k, v) => { try { localStorage.setItem(`rastro-sesion-${k}`, JSON.stringify(v)); } catch (e) {} };
+
+  function abrirExpediente(k) {
+    expGrupo = k;
+    sesiones[k] = sesiones[k] || leerSesion(k);
+    if (!capturas[k]) { try { capturas[k] = JSON.parse(localStorage.getItem(`rastro-captura-${k}`) || 'null'); } catch (e) {} }
+    $('expAcento').value = leerPref('rastro-acento') || '#c6f21c';
+    $('expTrato').value = leerPref('rastro-trato');
+    $('expCodigo').textContent = etiqueta(k).titulo;
+    $('expPapel').value = leerPref('rastro-papel') || 'carta';
+    $('expVista').hidden = false;
+    pintarExpediente();
+    // Busca la sesión en el servidor del prototipo ahora y cada 2 s mientras el expediente esté abierto
+    estadoServidor = { ok: true, ultimaOtra: null };
+    clearInterval(esperaSesion);
+    revisarSesion(k);
+    esperaSesion = setInterval(() => revisarSesion(k), 2000);
+  }
+
+  const mmss = s => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(Math.round(s % 60)).padStart(2, '0')}`;
+
+  // Lectura deliberadamente tosca del sistema: así "clasifica" a la persona
+  function clasificar(se) {
+    const r = Object.fromEntries((se.rostro.rasgos || []).map(x => [x.rasgo, x.promedio]));
+    const estados = [
+      ['agrado', r['sonrisa'] || 0],
+      ['sorpresa', ((r['cejas levantadas'] || 0) + (r['boca abierta'] || 0) + (r['ojos muy abiertos'] || 0)) / 2],
+      ['molestia', ((r['ceño fruncido'] || 0) + (r['nariz arrugada'] || 0) + (r['labios apretados'] || 0)) / 2],
+      ['tristeza', ((r['comisuras hacia abajo'] || 0) + (r['cejas levantadas'] || 0) * .5)],
+    ].sort((a, b) => b[1] - a[1]);
+    const estado = estados[0][1] < .12 ? 'neutral' : estados[0][0];
+    const centro = (se.ojos.miradaPct || {}).centro || 0;
+    const ppm = se.ojos.parpadeosPorMinuto || 0;
+    const inc = se.postura.inclinacionMediaGrados || 0;
+    const cerca = se.postura.cercaniaMedia || 0;
+    return {
+      estado,
+      atencion: centro >= 60 ? 'sostenida' : centro >= 35 ? 'intermitente' : 'dispersa',
+      alerta: ppm > 25 ? 'alta' : ppm >= 10 ? 'normal' : 'baja',
+      postura: inc > 8 ? 'inclinada' : 'erguida',
+      disposicion: (se.postura.manosArribaPct || 0) > 10 ? 'expansiva' : 'contenida',
+      distancia: cerca > .32 ? 'cercana' : cerca > .18 ? 'media' : 'lejana',
+      confianza: Math.round(((se.postura.presenciaPct || 0) + (se.rostro.presenciaPct || 0) + (se.ojos.presenciaPct || 0)) / 3),
+    };
+  }
+
+  // ---- Piezas gráficas de la hoja ----
+  const REG = '<svg viewBox="0 0 24 24" fill="none" stroke="#000" stroke-width="1.2"><circle cx="12" cy="12" r="6.5" fill="#fff"/><circle cx="12" cy="12" r="2" fill="#000" stroke="none"/><path d="M0 12h24M12 0v24"/></svg>';
+  const EQUIS = '<svg viewBox="0 0 100 100" preserveAspectRatio="none"><path d="M0 0L100 100M100 0L0 100" stroke="#000" stroke-width=".6" vector-effect="non-scaling-stroke"/></svg>';
+  const ICONOS = `<div class="iconos">
+      <svg viewBox="0 0 16 16" fill="none" stroke="#000"><circle cx="8" cy="8" r="6.5"/><circle cx="8" cy="8" r="4"/><path d="M1.5 8h13"/></svg>
+      <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5" fill="none" stroke="#000"/></svg>
+      <svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/></svg>
+      <svg viewBox="0 0 16 16" fill="none" stroke="#000"><path d="M8 0v16M2 4h12M2 8h12M2 12h12"/></svg>
+    </div>`;
+  const marco = (clase, contenido) => `<article class="hoja ${clase}"><div class="marco">
+      <span class="reg a">${REG}</span><span class="reg b">${REG}</span><span class="reg c">${REG}</span><span class="reg d">${REG}</span>
+      <span class="mas" style="left:0;top:50%">+</span><span class="mas" style="right:0;top:50%">+</span>
+      ${contenido}</div></article>`;
+  const kv = (a, b) => `<div class="kv"><span>${esc(a)}</span><i></i><b>${esc(b)}</b></div>`;
+  const medidor = (nombre, v) => `<div class="medidor">${kv(nombre, `${Math.round(v)} %`)}<span class="m"><i style="width:${Math.max(0, Math.min(100, v))}%"></i></span></div>`;
+  const fechaHoja = d => `${dosDig(d.getDate())}.${dosDig(d.getMonth() + 1)}.${d.getFullYear()}`;
+  const horaHoja = d => `${dosDig(d.getHours())}:${dosDig(d.getMinutes())}`;
+  const cabecera = (izq, titulo, der, codigo) => `<header class="cab">
+      <div class="meta"><span>${izq}</span><span class="ticks"></span><span>${der}</span></div>
+      <div class="titulo"><h1>${esc(titulo)}</h1><b>${esc(codigo)}</b></div>
+    </header>`;
+
+  // Recorte vertical 4:5 centrado en la cara (la captura viene en 16:9): la cara ocupa cerca del 40 %
+  // del alto. Si la cara es chica, el recorte no baja del 60 % del alto, para que no se pixele al imprimir.
+  const PROPORCION = 4 / 5;
+  function recorteCara(cap) {
+    const W = cap.ancho, H = cap.alto, c = cap.cara;
+    const alto = Math.min(H, W / PROPORCION, Math.max(H * .6, c.alto * H / .4, c.ancho * W / .4 / PROPORCION));
+    const ancho = alto * PROPORCION;
+    const cx = (c.x + c.ancho / 2) * W, cy = (c.y + c.alto / 2) * H + alto * .06;
+    const x0 = Math.max(0, Math.min(W - ancho, cx - ancho / 2)), y0 = Math.max(0, Math.min(H - alto, cy - alto / 2));
+    const px = v => `${(v / ancho * 100).toFixed(3)}%`, py = v => `${(v / alto * 100).toFixed(3)}%`;
+    return {
+      img: `width:${px(W)};height:${py(H)};left:${px(-x0)};top:${py(-y0)}`,
+      mira: `left:${px(c.x * W - x0)};top:${py(c.y * H - y0)};width:${px(c.ancho * W)};height:${py(c.alto * H)}`,
+    };
+  }
+  const pcCaja = c => `left:${c.x * 100}%;top:${c.y * 100}%;width:${c.ancho * 100}%;height:${c.alto * 100}%`;
+
+  // Una foto cargada a mano no trae recuadro: se supone la cara al centro, en el tercio superior
+  const CARA_SUPUESTA = { x: .36, y: .14, ancho: .28, alto: .42 };
+
+  function hojaCuerpo(k, se, cap) {
+    const titulo = etiqueta(k).titulo;
+    if (!se) {
+      return marco('', `${cabecera('[ rastro ] registro de sesión', 'Expediente', 'hoja 01/02', titulo)}
+        <div style="padding:6mm 5mm;text-transform:none">Sin sesión cargada. Usa «Cargar sesión (.json)» con el archivo que descargó el grabador de sesión del prototipo.</div>`);
+    }
+    const c = clasificar(se), inicio = new Date(se.inicio);
+    const muestras = (se.postura.muestras || 0) + (se.rostro.muestras || 0) + (se.ojos.muestras || 0);
+    const rasgos = (se.rostro.rasgos || []).slice(0, 5);
+    const gestos = Object.entries(se.rostro.gestosSeg || {}).sort((a, b) => b[1] - a[1]).slice(0, 2);
+    const m = se.ojos.miradaPct || {};
+    const celda = d => `<span style="background:color-mix(in srgb, var(--acento) ${Math.min(100, (m[d] || 0) * 1.6)}%, #fff)">${m[d] || 0}%</span>`;
+    const trato = $('expTrato').value;
+    const cara = cap && (cap.cara || CARA_SUPUESTA);
+    const r = cap && recorteCara({ ...cap, cara });
+    const centro = cara ? `X: ${(cara.x + cara.ancho / 2).toFixed(3)}` : 'X: —';
+    const centroY = cara ? `Y: ${(cara.y + cara.alto / 2).toFixed(3)}` : 'Y: —';
+    const foto = cap
+      ? `<div class="foto ${trato}"><img src="${cap.imagen}" alt="" style="${r.img}"><div class="mira" style="${r.mira}"><span>target: locked</span></div></div>`
+      : `<div class="foto"><div class="sin-foto">${EQUIS}<b>sin captura</b></div></div>`;
+    const plano = cap
+      ? `<div class="plano ${trato}"><img src="${cap.imagen}" alt=""><i style="${pcCaja(cara)}"></i></div>`
+      : `<div class="plano"><div class="sin-foto">${EQUIS}</div></div>`;
+    return marco('', `
+      ${cabecera(`[ rastro ] registro de sesión`, 'Expediente', `${fechaHoja(inicio)} — ${horaHoja(inicio)}`, titulo)}
+      <div class="principal">
+        <div class="regla">${ICONOS}<div class="escala"></div></div>
+        <div class="celda-foto">
+          <div class="rotulos"><span>fig_ ${esc(titulo)}.01</span><span>captura 01/01</span></div>
+          ${foto}
+          <div class="coord"><span>${centro}</span><span>${centroY}</span><span></span><span>t+${cap && cap.segundo != null ? mmss(cap.segundo) : '--:--'} / ${mmss(se.duracionSeg || 0)}</span></div>
+        </div>
+        <div class="lado">
+          <div><h2><span>[ plano general ]</span><span>16:9</span></h2>${plano}</div>
+          <div class="equis">${EQUIS}</div>
+          <div class="vertical">
+            <p>capturado sin aviso // ${muestras.toLocaleString('es-CL')} cuadros analizados</p>
+            <p>confianza del sistema ${c.confianza} % // file_id: ${esc(titulo)}-sesion</p>
+          </div>
+        </div>
+      </div>
+      <div class="datos">
+        <section><h2><span>[ cuerpo ]</span><span class="r">02</span></h2>
+          ${kv('Inclinación media', `${se.postura.inclinacionMediaGrados}°`)}
+          ${kv('Inclinación máx.', `${se.postura.inclinacionMaxGrados}°`)}
+          ${kv('Distancia', c.distancia)}
+          ${kv('Manos arriba', `${se.postura.manosArribaPct} %`)}
+          ${kv('Personas en cuadro', se.postura.personasMax || 0)}
+          ${gestos.length ? gestos.map(([g, t]) => kv(g, `${t} s`)).join('') : kv('Gestos', 'ninguno')}
+        </section>
+        <section><h2><span>[ mirada ]</span><span class="r">03</span></h2>
+          <div class="cruz"><span class="v"></span>${celda('arriba')}<span class="v"></span>${celda('izquierda')}${celda('centro')}${celda('derecha')}<span class="v"></span>${celda('abajo')}<span class="v"></span></div>
+          ${kv('Parpadeos / min', se.ojos.parpadeosPorMinuto)}
+          ${kv('Ojos cerrados', `${se.ojos.cerradosPct} %`)}
+        </section>
+        <section><h2><span>[ rostro ]</span><span class="r">04</span></h2>
+          ${rasgos.map(x => medidor(x.rasgo, x.promedio * 100)).join('')}
+        </section>
+      </div>
+      <section class="clasif">
+        <h2><span>[ clasificación automática ]</span><span>duración ${mmss(se.duracionSeg || 0)} · confianza ${c.confianza} %</span></h2>
+        <div class="valores">
+          <div><span>estado</span><b>${esc(c.estado)}</b></div>
+          <div><span>atención</span><b>${esc(c.atencion)}</b></div>
+          <div><span>alerta</span><b>${esc(c.alerta)}</b></div>
+          <div><span>postura</span><b>${esc(c.postura)}</b></div>
+          <div><span>disposición</span><b>${esc(c.disposicion)}</b></div>
+        </div>
+      </section>
+      <footer class="pie"><span>clasificado en ${mmss(se.duracionSeg || 0)} // sin preguntarte // continúa en la hoja 02</span><b>rastro 01/02</b></footer>`);
+  }
+
+  // Mapa de las comunas por las que pasan las fotos. Para no imprimir coordenadas exactas,
+  // la línea une el centro de cada comuna, no el punto de cada foto.
+  function mapaRecorrido(fotos, ruta) {
+    const visitadas = [...new Map(fotos.filter(f => f.comuna).map(f => [f.comuna.comuna, f.comuna])).values()];
+    if (!visitadas.length || !comunas) return `<div class="mapa-ruta"><div class="foto" style="aspect-ratio:auto;height:100%;border:0"><div class="sin-foto">${EQUIS}<b>sin ubicación</b></div></div></div>`;
+    let [x0, y0, x1, y1] = [180, 90, -180, -90];
+    visitadas.forEach(c => { x0 = Math.min(x0, c.caja[0]); y0 = Math.min(y0, c.caja[1]); x1 = Math.max(x1, c.caja[2]); y1 = Math.max(y1, c.caja[3]); });
+    const k = Math.cos(y0 * Math.PI / 180);
+    const lado = Math.max((x1 - x0) * k, y1 - y0) * 1.25;
+    const mx = (x0 + x1) / 2, my = (y0 + y1) / 2;
+    const px = x => (((x - mx) * k) / lado + .5) * 100, py = y => ((my - y) / lado + .5) * 100;
+    const [bx0, bx1] = [mx - lado / 2 / k, mx + lado / 2 / k], [by0, by1] = [my - lado / 2, my + lado / 2];
+    const camino = c => c.polys.map(p => p.map(r => 'M' + r.map(([x, y]) => px(x).toFixed(2) + ' ' + py(y).toFixed(2)).join('L') + 'Z').join('')).join('');
+    const nombres = new Set(visitadas.map(c => c.comuna));
+    const vecinas = comunas.filter(c => !nombres.has(c.comuna) && c.caja[2] > bx0 && c.caja[0] < bx1 && c.caja[3] > by0 && c.caja[1] < by1);
+    const centro = n => { const c = visitadas.find(v => v.comuna === n); return [px((c.caja[0] + c.caja[2]) / 2), py((c.caja[1] + c.caja[3]) / 2)]; };
+    const puntos = ruta.map(centro);
+    const unicas = [...new Set(ruta)];   // cada comuna se numera una vez, por orden de primera visita
+    return `<div class="mapa-ruta"><svg viewBox="0 0 100 100" role="img" aria-label="Mapa de comunas del recorrido">
+      <defs><clipPath id="recorte-mapa"><rect width="100" height="100"/></clipPath></defs>
+      <g clip-path="url(#recorte-mapa)">
+        ${vecinas.map(c => `<path class="otra" d="${camino(c)}" fill-rule="evenodd"/>`).join('')}
+        ${visitadas.map(c => `<path class="visitada" d="${camino(c)}" fill-rule="evenodd"/>`).join('')}
+        ${puntos.length > 1 ? `<path class="linea" d="M${puntos.map(([x, y]) => `${x.toFixed(2)} ${y.toFixed(2)}`).join('L')}"/>` : ''}
+        ${unicas.map((n, i) => { const [x, y] = centro(n); return `<circle cx="${x.toFixed(2)}" cy="${y.toFixed(2)}" r="2.8"/><text x="${x.toFixed(2)}" y="${y.toFixed(2)}">${i + 1}</text>`; }).join('')}
+      </g></svg></div>`;
+  }
+
+  // Visitante sin registro: no hay fotos propias. La hoja 2 le muestra lo que dijeron las fotos de los demás
+  // y le devuelve la pregunta a su propio teléfono (cierre provisional, paso 2 del plan).
+  function hojaSinRegistro(k) {
+    const titulo = etiqueta(k).titulo;
+    const otros = [...grupos.entries()].filter(([c, g]) => /^P\d+$/.test(c) && g.cargado && g.fotos.length);
+    const fotos = otros.flatMap(([, g]) => g.fotos.filter(f => !f.fallo));
+    const comunasOtros = new Set(fotos.filter(f => f.comuna).map(f => f.comuna.comuna));
+    const conGps = fotos.filter(f => f.gps).length;
+    const noche = fotos.filter(f => { const q = partesFecha(f.fecha); return q && (q.hh >= 22 || q.hh < 6); }).length;
+    const n = otros.length;
+    const dato = n
+      ? `Otras ${n} persona${n === 1 ? '' : 's'} sí. Sus ${fotos.length} fotos traían la ubicación en ${conGps} casos y las situaron en ${comunasOtros.size} comuna${comunasOtros.size === 1 ? '' : 's'}${noche ? `; ${noche} eran de noche` : ''}.`
+      : 'Otras personas sí, y sus fotos dijeron dónde estuvieron.';
+    return marco('', `
+      ${cabecera('[ rastro ] metadatos de tus fotos', 'Recorrido', 'sin fotos', titulo)}
+      <div style="padding:10mm 5mm;display:grid;gap:8mm;text-transform:none">
+        <p class="final" style="font-size:40pt">No nos diste tus fotos.</p>
+        <p style="font:500 14pt/1.3 'Inter Tight',sans-serif;margin:0;max-width:150mm">${esc(dato)}</p>
+        <div><h2><span>[ ellos ]</span><span>${n} personas</span></h2>
+          ${kv('Fotos recibidas', fotos.length)}
+          ${kv('Con ubicación', `${conGps} de ${fotos.length}`)}
+          ${kv('Comunas', comunasOtros.size)}
+          ${kv('De noche (22–06 h)', noche)}
+        </div>
+      </div>
+      <div class="cierre">
+        <div class="barra-ac"></div>
+        <p class="final">${esc($('expFrase').value.trim() || '¿Cuántas fotos subiste esta semana a otras plataformas?')}</p>
+        <p class="nota">Datos agregados de los metadatos de las fotos de otros participantes. Sin nombres ni coordenadas.</p>
+      </div>
+      <footer class="pie"><span>no nos diste tus fotos // ${esc(titulo)}</span><b>rastro 02/02</b></footer>`);
+  }
+
+  function hojaRecorrido(k, g) {
+    if (g.sinRegistro) return hojaSinRegistro(k);
+    const titulo = etiqueta(k).titulo;
+    const fotos = ordenadas(g.fotos.filter(f => !f.fallo));
+    const r = resumen(g);
+    const modelos = [...new Set(fotos.map(f => f.modelo).filter(Boolean))];
+    const software = [...new Set(fotos.map(f => f.meta && f.meta.Software).filter(Boolean))];
+    const ios = fotos.some(f => /apple/i.test(f.modelo || '')) && software.find(v => /^\d+(\.\d+)*$/.test(v));
+    const correlativos = fotos.map(f => (f.nombre.match(/^IMG_(\d{4})/i) || [])[1]).filter(Boolean).map(Number);
+    const noche = fotos.filter(f => { const q = partesFecha(f.fecha); return q && (q.hh >= 22 || q.hh < 6); }).length;
+    const conHora = fotos.filter(f => partesFecha(f.fecha)).length;
+    const MAX = 22, visibles = fotos.slice(0, MAX);
+    const numero = n => r.ruta.filter((x, i) => r.ruta.indexOf(x) === i).indexOf(n) + 1;
+    const paradas = visibles.map((f, i) => {
+      const q = partesFecha(f.fecha);
+      const dia = q ? `${q.dia.slice(0, 3)} ${dosDig(q.d)}.${dosDig(q.mo)}` : 'sin fecha';
+      const hora = q ? `${dosDig(q.hh)}:${dosDig(q.mm)}` : '—';
+      const lugar = f.comuna ? `${esc(f.comuna.comuna)}<span class="n">${numero(f.comuna.comuna)}</span>`
+        : f.probable ? `≈ ${esc(f.probable.comuna.comuna)}` : 'sin ubicación';
+      return `<div class="parada ${f.comuna ? '' : f.probable ? 'prob' : 'sin'}"><span class="r">${dosDig(i + 1)}</span><span>${dia}</span><span>${hora}</span><span class="c">${lugar}</span></div>`;
+    }).join('') + (fotos.length > MAX ? `<p class="nota" style="margin-top:1.5mm">+ ${fotos.length - MAX} fotos más</p>` : '');
+    const frase = $('expFrase').value.trim() || (r.conGps ? FRASE.recorrido : FRASE.sinUbicacion);
+    const resumenTxt = r.conGps
+      ? `Tus fotos te ubican en ${r.comunas.length} comuna${r.comunas.length === 1 ? '' : 's'} durante ${r.dias} día${r.dias === 1 ? '' : 's'}.`
+      : `Tus fotos no traían ubicación. ${noche ? `${noche} de ${conHora} son de noche.` : ''}`;
+    const dias = fotos.map(f => partesFecha(f.fecha)).filter(Boolean);
+    const rango = dias.length ? `${dosDig(dias[0].d)}.${dosDig(dias[0].mo)} — ${dosDig(dias[dias.length - 1].d)}.${dosDig(dias[dias.length - 1].mo)}` : 'sin fechas';
+    return marco('dos-cols', `
+      ${cabecera('[ rastro ] metadatos de tus fotos', 'Recorrido', rango, titulo)}
+      <div class="recorrido">
+        <div class="semana ${fotos.length > 14 ? 'muchas' : fotos.length > 8 ? 'varias' : ''}">
+          <h2><span>[ tu semana ]</span><span>${fotos.length} fotos · ${r.conGps} con ubicación</span></h2>
+          ${paradas || '<p>Sin fotos.</p>'}
+          ${r.ruta.length > 1 ? `<p class="secuencia">${r.ruta.map(esc).join(' → ')}</p>` : ''}
+        </div>
+        <div class="lado">
+          <div><h2><span>[ fig_ recorrido ]</span><span>${r.comunas.length} comuna${r.comunas.length === 1 ? '' : 's'}</span></h2>${mapaRecorrido(fotos, r.ruta)}</div>
+          <div><h2><span>[ tu teléfono ]</span><span class="r">06</span></h2>
+            ${kv('Modelo', modelos.join(', ') || 'no informado')}
+            ${ios ? kv('Sistema', `iOS ${ios}`) : ''}
+            ${kv('Fotos recibidas', fotos.length)}
+            ${kv('Con ubicación', `${r.conGps} de ${fotos.length}`)}
+            ${correlativos.length ? kv('Fotos en el teléfono', `+${(Math.floor(Math.max(...correlativos) / 100) * 100).toLocaleString('es-CL')}`) : ''}
+            ${kv('De noche (22–06 h)', `${noche} de ${conHora}`)}
+          </div>
+          <div class="equis" style="height:auto">${EQUIS}</div>
+        </div>
+      </div>
+      <div class="cierre">
+        <span>${esc(resumenTxt)}</span>
+        <div class="barra-ac"></div>
+        <p class="final">${esc(frase)}</p>
+        <p class="nota">Datos leídos de los metadatos de las fotos que subiste. Las coordenadas exactas no se imprimen.${fotos.some(f => f.probable) ? ' ≈ Comuna probable: la foto no traía ubicación y se estima con la foto con GPS más cercana del mismo día.' : ''}</p>
+      </div>
+      <footer class="pie"><span>no nos dijiste dónde estuviste // ${esc(titulo)}</span><b>rastro 02/02</b></footer>`);
+  }
+
+  async function pintarExpediente() {
+    const k = expGrupo, g = grupos.get(k);
+    if (!g) return;
+    const [w, h, pagina] = PAPELES[$('expPapel').value] || PAPELES.carta;
+    document.documentElement.style.setProperty('--hoja-w', w);
+    document.documentElement.style.setProperty('--hoja-h', h);
+    $('expPagina').textContent = `@media print { @page { size: ${pagina}; margin: 0; } }`;
+    if (!g.cargado) { $('expHojas').innerHTML = '<p>Preparando las fotos…</p>'; await cargarGrupo(k); }
+    const se = sesiones[k];
+    $('expAviso').innerHTML = avisoSesion(k);
+    const cap = capturas[k] || (se && se.captura) || null;
+    $('expHojas').innerHTML = hojaCuerpo(k, se, cap) + hojaRecorrido(k, g);
+    document.querySelectorAll('.hoja').forEach(h => h.style.setProperty('--acento', $('expAcento').value));
+  }
+
+  $('expSesion').addEventListener('change', async e => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    try {
+      const se = JSON.parse(await f.text());
+      if (!se.postura || !se.rostro || !se.ojos) throw new Error('no es un archivo de sesión');
+      sesiones[expGrupo] = se;
+      guardarSesion(expGrupo, se);
+      pintarExpediente();
+    } catch (err) {
+      $('expAviso').textContent = `No se pudo leer el archivo: ${err.message}`;
+    }
+  });
+  $('expCaptura').addEventListener('change', async e => {
+    const f = e.target.files[0];
+    e.target.value = '';
+    if (!f) return;
+    const imagen = await new Promise(res => { const lr = new FileReader(); lr.onload = () => res(lr.result); lr.readAsDataURL(f); });
+    const img = new Image();
+    img.src = imagen;
+    await img.decode();
+    capturas[expGrupo] = { imagen, ancho: img.naturalWidth, alto: img.naturalHeight, cara: null, segundo: null };
+    try { localStorage.setItem(`rastro-captura-${expGrupo}`, JSON.stringify(capturas[expGrupo])); } catch (err) {}
+    pintarExpediente();
+  });
+  $('expAcento').addEventListener('change', () => { guardarPref('rastro-acento', $('expAcento').value); pintarExpediente(); });
+  $('expTrato').addEventListener('change', () => { guardarPref('rastro-trato', $('expTrato').value); pintarExpediente(); });
+  $('expPapel').addEventListener('change', () => { guardarPref('rastro-papel', $('expPapel').value); pintarExpediente(); });
+  $('expFrase').addEventListener('input', () => pintarExpediente());
+  $('expImprimir').addEventListener('click', () => window.print());
+  $('expCerrar').addEventListener('click', () => { $('expVista').hidden = true; clearInterval(esperaSesion); });
+  $('expAviso').addEventListener('click', e => {
+    const b = e.target.closest('[data-usar]');
+    if (b) usarSesionDe(b.dataset.usar).catch(() => { $('expAviso').textContent = 'No se pudo traer esa sesión.'; });
+  });
+
+
+  // ---- Expediente de muestra (datos inventados, para diseñar la hoja) ----
+  // Se abre con el botón o entrando con ?muestra en la URL; así, al guardar cambios con Live Server
+  // la página se recarga y vuelve a mostrar el expediente.
+  const SESION_MUESTRA = {"version":1,"codigo":"P0","inicio":"2026-10-14T13:42:10.000Z","duracionSeg":512,
+    "postura":{"muestras":15360,"presenciaPct":96,"inclinacionMediaGrados":6.1,"inclinacionMaxGrados":14.2,"cercaniaMedia":0.27,"manosArribaPct":4,"personasMax":1},
+    "rostro":{"muestras":15360,"presenciaPct":91,"rasgos":[{"rasgo":"ceño fruncido","promedio":0.31},{"rasgo":"ojos entrecerrados","promedio":0.24},{"rasgo":"sonrisa","promedio":0.12},{"rasgo":"boca abierta","promedio":0.09},{"rasgo":"cejas levantadas","promedio":0.07}],"gestosSeg":{"palma abierta":3.4,"índice arriba":1.1}},
+    "ojos":{"muestras":15360,"presenciaPct":91,"cerradosPct":4,"parpadeos":171,"parpadeosPorMinuto":20,"miradaPct":{"centro":52,"izquierda":11,"derecha":19,"arriba":3,"abajo":15}}};
+  const FOTOS_MUESTRA = [
+    ['2026:10:06 09:12:00', -33.51, -70.76], ['2026:10:07 13:33:00', -33.52, -70.59], ['2026:10:08 23:40:00', -33.41, -70.66],
+    ['2026:10:09 08:20:00', null, null], ['2026:10:10 18:05:00', -33.52, -70.59], ['2026:10:11 01:15:00', -33.41, -70.66], ['2026:10:12 12:47:00', -33.51, -70.76],
+  ];
+
+  async function abrirMuestra() {
+    while (!comunas) await new Promise(r => setTimeout(r, 100));
+    const fotos = FOTOS_MUESTRA.map(([fecha, lat, lon], i) => {
+      const f = { nombre: `IMG_64${50 + i}.HEIC`, fecha, zona: '-03:00', lat, lon, gps: lat != null, modelo: 'Apple iPhone 15 Pro', meta: { Software: '26.4.2' }, url: null };
+      f.comuna = buscarComuna(f);
+      return f;
+    });
+    estimarComunas(fotos);
+    grupos.set('MUESTRA', { clave: 'MUESTRA', filas: [], fotos, cargado: true, cargando: false });
+    sesiones.MUESTRA = SESION_MUESTRA;
+    abrirExpediente('MUESTRA');
+  }
+  $('muestra').addEventListener('click', abrirMuestra);
+  if (new URLSearchParams(location.search).has('muestra')) abrirMuestra();
+
+  // ---- Eventos ----
+  $('actualizar').addEventListener('click', cargarPlanilla);
+  $('clave').addEventListener('keydown', e => { if (e.key === 'Enter') cargarPlanilla(); });
+  $('lista').addEventListener('click', e => { const b = e.target.closest('[data-k]'); if (b) seleccionar(b.dataset.k); });
+  $('principal').addEventListener('click', e => { const t = e.target.closest('.tarjeta'); if (t) abrirFicha(Number(t.dataset.i)); });
+  $('velo').addEventListener('click', e => { if (e.target === $('velo')) cerrarFicha(); });
+  document.addEventListener('keydown', e => {
+    if ($('velo').hidden) return;
+    const n = (grupos.get(grupoActual)?.orden || []).length;
+    if (e.key === 'Escape') cerrarFicha();
+    if (e.key === 'ArrowLeft' && fichaIdx > 0) { fichaIdx--; pintarFicha(); }
+    if (e.key === 'ArrowRight' && fichaIdx < n - 1) { fichaIdx++; pintarFicha(); }
+  });
+
+  // Las fotos guardadas traen GPS: este botón las borra de este navegador
+  $('olvidar').addEventListener('click', async () => {
+    await borrarGuardadas();
+    fotoPorId.forEach(f => f.url && URL.revokeObjectURL(f.url));
+    fotoPorId.clear();
+    grupos.forEach((g, k) => { if (k !== 'computador') Object.assign(g, { fotos: [], cargado: false, cargando: false, progreso: 0 }); });
+    cerrarFicha();
+    pintarTodo();
+    avisar('Se borraron las fotos guardadas en este navegador. Se descargan de nuevo al abrir cada participante.');
+  });
+
+  // ---- Control desde la consola del testeo (2026-tres-analisis-paralelo/consola.html) ----
+  // La consola carga este visor en un marco del mismo servidor y lo maneja con estas funciones.
+  window.rastroVisor = {
+    tieneClave: () => !!$('clave').value.trim(),
+    cargarPlanilla,
+    participantes: () => [...grupos.keys()].filter(k => /^P\d+$/.test(k)).sort(ordenGrupos).map(k => {
+      const g = grupos.get(k), r = resumen(g);
+      return { codigo: k, fotos: r.total, conGps: g.cargado ? r.conGps : null, cargado: g.cargado, cargando: !!g.cargando };
+    }),
+    preparar: k => cargarGrupo(k),
+    sinRegistro: k => { if (!grupos.has(k)) grupos.set(k, { clave: k, filas: [], fotos: [], cargado: true, cargando: false, sinRegistro: true }); },
+    tieneSesion: k => !!(sesiones[k] || leerSesion(k)),
+    // Arma el expediente con la sesión recién grabada y espera a que esté listo para imprimir
+    async expediente(k, se) {
+      if (se) { sesiones[k] = se; guardarSesion(k, se); }
+      if (!grupos.has(k)) this.sinRegistro(k);
+      abrirExpediente(k);
+      await cargarGrupo(k);
+      await pintarExpediente();
+      await Promise.all([...$('expHojas').querySelectorAll('img')].map(i => i.decode().catch(() => {})));
+      await document.fonts.ready;
+    },
+    imprimir: () => new Promise(ok => { window.addEventListener('afterprint', ok, { once: true }); window.print(); setTimeout(ok, 8000); }),
+  };
+
+  cargarComunas();
+  if ($('clave').value) cargarPlanilla();
+</script>
+</body>
+</html>

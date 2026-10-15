@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap">
+  <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
+  <style>
+    /* Mismo sistema que el formulario de inscripción: blanco, negro y verde ácido; medidas en rem. */
+    :root {
+      --blanco: #ffffff;
+      --negro: #0b0b0b;
+      --verde: #c6f21c;
+      --tenue: rgba(11, 11, 11, .5);
+      --sans: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      --radio: 1.5rem;
+      color-scheme: light;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: var(--blanco); color: var(--negro); font: 500 1rem/1.45 var(--sans); -webkit-font-smoothing: antialiased; }
+    main { max-width: 72rem; margin: 0 auto; padding-inline: 1rem; padding-block: 1.25rem 3rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+
+    .barra { display: flex; justify-content: space-between; align-items: baseline; font-size: 1.25rem; letter-spacing: -.02em; padding-bottom: .5rem; }
+    .barra b { font-weight: 600; }
+    .tenue { color: var(--tenue); }
+
+    /* Presentación */
+    .portada { background: var(--negro); color: var(--blanco); border-radius: var(--radio); padding: 1.5rem; display: grid; gap: 1.5rem; align-content: start; }
+    .portada small { font-size: .8rem; color: rgba(255, 255, 255, .6); }
+    .portada h1 { font-size: clamp(2.5rem, 9vw, 4.5rem); font-weight: 700; letter-spacing: -.05em; line-height: .92; margin: 0; }
+    .portada h1 span { color: var(--verde); }
+    .portada p { margin: 0; color: rgba(255, 255, 255, .82); max-width: 40ch; }
+    .hechos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid rgba(255, 255, 255, .25); padding-top: 1rem; }
+    .hecho { display: grid; gap: .15rem; min-width: 0; }
+    .hecho + .hecho { border-left: 1px solid rgba(255, 255, 255, .25); padding-left: .9rem; }
+    .hecho b { font-size: clamp(1.4rem, 5.5vw, 2.25rem); font-weight: 600; letter-spacing: -.04em; line-height: 1; }
+    .hecho span { font-size: .8rem; color: rgba(255, 255, 255, .6); }
+
+    /* Pasos */
+    .pasos { display: grid; gap: .75rem; align-content: start; }
+    .paso { border: 1.5px solid var(--negro); border-radius: var(--radio); padding: 1.25rem 1.25rem 1.4rem; display: grid; gap: .75rem; min-width: 0; transition: background .15s; }
+    .paso.activo:focus-within { background: var(--verde); }
+    .paso.hecho-ok { border-style: dashed; }
+    .num { font-size: .85rem; font-weight: 600; color: var(--tenue); }
+    .paso:focus-within .num, .paso:focus-within .ayuda { color: var(--negro); }
+    .titulo { font-size: 1.5rem; font-weight: 700; letter-spacing: -.035em; line-height: 1.1; margin: 0; }
+    .ayuda { font-size: .85rem; color: var(--tenue); margin: 0; }
+    .aviso { font-size: .9rem; font-weight: 600; margin: 0; }
+    .aviso::before { content: "↳ "; }
+    .confirmado { font-weight: 600; }
+    .confirmado::before { content: "✓ "; }
+
+    input[type=text] { font: 600 1.25rem var(--sans); letter-spacing: -.02em; color: var(--negro); background: transparent; border: 0; border-bottom: 1.5px solid var(--negro); border-radius: 0; padding: .5rem 0 .4rem; width: 100%; }
+    input[type=text]::placeholder { color: var(--negro); opacity: .28; }
+    input[type=text]:focus { outline: none; border-bottom-width: 3px; }
+
+    .boton { width: 100%; background: var(--verde); color: var(--negro); border: 1.5px solid var(--negro); border-radius: 999px; padding: 1rem 1.5rem; font: 600 1.15rem var(--sans); cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    .boton:hover { background: var(--negro); color: var(--verde); }
+    .boton.sec { background: var(--blanco); }
+    .boton.sec:hover { background: var(--negro); color: var(--blanco); }
+    .boton:disabled { opacity: .5; cursor: default; }
+    .boton:focus-visible { outline: 3px solid var(--negro); outline-offset: 3px; }
+    #fotos { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+    .dos { display: grid; gap: .5rem; }
+    .indicaciones { margin: 0; padding-left: 1.1rem; display: grid; gap: .35rem; font-size: .95rem; }
+
+    /* Fotos elegidas */
+    .grilla { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 6.5rem), 1fr)); gap: .5rem; }
+    .foto { position: relative; aspect-ratio: 1; border: 1.5px solid var(--negro); border-radius: 1rem; overflow: hidden; background: var(--blanco); display: grid; place-items: center; }
+    .foto img { width: 100%; height: 100%; object-fit: cover; }
+    .foto .sin { font-size: .7rem; padding: .4rem; text-align: center; overflow-wrap: anywhere; color: var(--tenue); }
+    .foto .estado { position: absolute; left: .35rem; bottom: .35rem; right: .35rem; font-size: .7rem; font-weight: 600; background: var(--blanco); border: 1.5px solid var(--negro); border-radius: 999px; padding: .15rem .45rem; text-align: center; }
+    .foto[data-estado="subiendo"] .estado { background: var(--negro); color: var(--blanco); }
+    .foto[data-estado="lista"] .estado { background: var(--verde); }
+    .foto[data-estado="error"] { border-width: 3px; }
+    .foto[data-estado="error"] .estado { background: var(--negro); color: var(--verde); }
+    .foto .quitar { position: absolute; top: .3rem; left: .3rem; width: 2rem; height: 2rem; border-radius: 50%; background: var(--blanco); color: var(--negro); border: 1.5px solid var(--negro); display: grid; place-items: center; font: 600 1.15rem/1 var(--sans); cursor: pointer; padding: 0; }
+    .foto .quitar:hover, .foto .quitar:focus-visible { background: var(--negro); color: var(--blanco); outline: none; }
+    .grilla.bloqueada .quitar { display: none; }
+    .foto .alerta { position: absolute; top: .35rem; right: .35rem; width: 1.4rem; height: 1.4rem; border-radius: 50%; background: var(--negro); color: var(--verde); display: grid; place-items: center; font-size: .8rem; font-weight: 700; }
+    .avisos { margin: 0; padding-left: 1.1rem; display: grid; gap: .3rem; font-size: .85rem; }
+
+    /* Mientras el teléfono prepara las fotos elegidas (en iPhone puede tardar varios segundos) */
+    .boton.cargando { background: var(--negro); color: var(--verde); pointer-events: none; position: relative; overflow: hidden; }
+    .boton.cargando::after { content: ""; position: absolute; left: 0; bottom: 0; height: 3px; width: 40%; background: var(--verde); animation: cargando 1.1s ease-in-out infinite; }
+    @keyframes cargando { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+    /* Progreso */
+    .progreso { display: grid; gap: .4rem; }
+    .barra-progreso { height: .75rem; border: 1.5px solid var(--negro); border-radius: 999px; overflow: hidden; }
+    .barra-progreso i { display: block; height: 100%; width: 0; background: var(--verde); border-right: 1.5px solid var(--negro); transition: width .3s; }
+    .progreso p { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+    /* Aviso final */
+    .velo { position: fixed; inset: 0; background: rgba(11, 11, 11, .55); display: grid; place-items: center; padding: 1rem; z-index: 10; }
+    .ventana { background: var(--verde); border: 1.5px solid var(--negro); border-radius: var(--radio); padding: 1.75rem; max-width: 28rem; width: 100%; display: grid; gap: 1rem; }
+    .ventana .check { width: 3.5rem; height: 3.5rem; border-radius: 50%; background: var(--negro); color: var(--verde); display: grid; place-items: center; font-size: 1.75rem; font-weight: 700; }
+    .ventana h2 { font-size: clamp(1.75rem, 7vw, 2.4rem); font-weight: 700; letter-spacing: -.045em; line-height: 1; margin: 0; }
+    .ventana p { margin: 0; font-size: 1.05rem; }
+    .ventana .boton { background: var(--negro); color: var(--verde); }
+    .ventana .boton:hover { background: var(--blanco); color: var(--negro); }
+
+    @media (min-width: 56rem) {
+      main { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 1rem; padding-inline: 1.75rem; padding-block: 1.5rem 4rem; }
+      .barra { grid-column: 1 / -1; font-size: 1.5rem; padding-bottom: 1rem; }
+      .portada { position: sticky; top: 1.5rem; align-self: start; padding: 2rem; min-height: calc(100vh - 7rem); align-content: space-between; }
+      .paso { padding: 1.5rem 1.75rem 1.75rem; }
+      .titulo { font-size: 1.85rem; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <div class="barra"><span><b>rastro</b> <span class="tenue">testeo</span></span><span class="tenue">Diseño UDP</span></div>
+
+  <section class="portada">
+    <div style="display:grid;gap:1rem">
+      <small>Proyecto de título · Escuela de Diseño UDP</small>
+      <h1>Sube las fotos de tu <span>semana</span></h1>
+      <p>Estas fotos pasan a formar parte del archivo colectivo de la instalación.</p>
+    </div>
+    <div class="hechos">
+      <div class="hecho"><b>7</b><span>fotos</span></div>
+      <div class="hecho"><b>7 días</b><span>de esta semana</span></div>
+      <div class="hecho"><b>1 min</b><span>para subirlas</span></div>
+    </div>
+  </section>
+
+  <div class="pasos">
+    <!-- Paso 1: RUT -->
+    <section class="paso activo" id="pasoRut">
+      <span class="num">01</span>
+      <label class="titulo" for="rut">Tu RUT</label>
+      <input type="text" id="rut" placeholder="12.345.678-9" autocomplete="off" autocapitalize="characters" maxlength="14">
+      <p class="ayuda">El mismo con el que te inscribiste.</p>
+      <p class="aviso" id="avisoRut" hidden></p>
+      <p class="confirmado" id="rutListo" hidden>RUT confirmado.</p>
+      <button class="boton" id="seguir"><span>Seguir</span><span aria-hidden="true">→</span></button>
+    </section>
+
+    <!-- Paso 2: asistencia -->
+    <section class="paso" id="pasoAsistencia" hidden>
+      <span class="num">02</span>
+      <h2 class="titulo">¿Puedes asistir el miércoles 14 de octubre en la mañana?</h2>
+      <p class="ayuda" id="cuandoAsistencia">La sesión dura unos 30 minutos.</p>
+      <div class="dos">
+        <button class="boton" data-asiste="sí"><span>Sí, puedo</span><span aria-hidden="true">→</span></button>
+        <button class="boton sec" data-asiste="no"><span>No puedo</span><span aria-hidden="true">×</span></button>
+      </div>
+      <p class="aviso" id="avisoAsistencia" hidden></p>
+      <p class="confirmado" id="asistenciaLista" hidden>Asistencia confirmada.</p>
+    </section>
+
+    <!-- Fin si no puede asistir -->
+    <section class="paso" id="pasoNoAsiste" hidden>
+      <h2 class="titulo">Gracias por avisar</h2>
+      <p>Quedó registrado que no puedes asistir. No necesitas subir fotos. Si cambias de idea, vuelve a abrir el enlace del correo.</p>
+    </section>
+
+    <!-- Paso 3: fotos -->
+    <section class="paso" id="pasoFotos" hidden>
+      <span class="num">03</span>
+      <h2 class="titulo">Elige 7 fotos</h2>
+      <ul class="indicaciones">
+        <li>De <strong>esta semana</strong>, idealmente de días distintos.</li>
+        <li>Tomadas con <strong>la cámara de tu teléfono</strong>: no capturas de pantalla ni fotos que te enviaron por WhatsApp.</li>
+        <li>Elígelas desde tu galería o Fototeca.</li>
+      </ul>
+      <label class="boton sec" for="fotos" id="elegir"><span id="elegirTexto">Elegir fotos</span><span aria-hidden="true">+</span></label>
+      <p class="ayuda" id="cuenta" role="status" aria-live="polite" hidden></p>
+      <input id="fotos" type="file" accept="image/*" multiple>
+      <div class="grilla" id="grilla"></div>
+      <ul class="avisos" id="avisos" hidden></ul>
+      <p class="aviso" id="avisoFotos" hidden></p>
+
+      <div class="progreso" id="progreso" hidden>
+        <div class="barra-progreso" aria-hidden="true"><i id="relleno"></i></div>
+        <p id="textoProgreso" role="status" aria-live="polite"></p>
+      </div>
+      <button class="boton" id="subir" hidden><span id="subirTexto">Subir fotos</span><span aria-hidden="true">→</span></button>
+    </section>
+  </div>
+</main>
+
+<!-- Aviso final -->
+<div class="velo" id="velo" hidden>
+  <div class="ventana" role="dialog" aria-modal="true" aria-labelledby="tituloFinal">
+    <span class="check" aria-hidden="true">✓</span>
+    <h2 id="tituloFinal">Recibimos tus fotos</h2>
+    <p id="textoFinal"></p>
+    <p><strong>¡Muchas gracias!</strong></p>
+    <button class="boton" id="cerrar"><span>Cerrar</span><span aria-hidden="true">×</span></button>
+  </div>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+  const telefono = /iPhone|iPad/.test(navigator.userAgent) ? 'iphone' : /Android/.test(navigator.userAgent) ? 'android' : 'otro';
+  let rut = '';
+  let sesion = { cuando: 'el miércoles 14 de octubre', lugar: '' };
+  let lecturas = [];
+  let subidas = 0;
+
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  function mostrar(id, texto) { $(id).textContent = texto || ''; $(id).hidden = !texto; }
+
+  // ---- Paso 1: RUT ----
+  function verificar() {
+    const r = $('rut').value.trim();
+    if (!r) return mostrar('avisoRut', 'Escribe el RUT con que te inscribiste.');
+    $('seguir').disabled = true;
+    mostrar('avisoRut', '');
+    google.script.run
+      .withSuccessHandler(res => {
+        $('seguir').disabled = false;
+        if (res.estado === 'no') return mostrar('avisoRut', 'No encontré ese RUT entre las inscripciones. Revísalo o responde el correo que te envié.');
+        if (res.estado === 'pendiente') return mostrar('avisoRut', 'Tu inscripción todavía no está confirmada. Te escribiré cuando puedas subir tus fotos.');
+        rut = r;
+        sesion = res;
+        $('rut').disabled = true;
+        $('seguir').hidden = true;
+        $('rutListo').hidden = false;
+        $('pasoRut').classList.remove('activo');
+        $('pasoRut').classList.add('hecho-ok');
+        $('cuandoAsistencia').textContent = `Te espero ${res.cuando}${res.lugar && !res.lugar.startsWith('[') ? `, en ${res.lugar}` : ''}. La sesión dura unos 30 minutos.`;
+        $('pasoAsistencia').hidden = false;
+        $('pasoAsistencia').classList.add('activo');
+        $('pasoAsistencia').scrollIntoView({ block: 'start', behavior: 'smooth' });
+      })
+      .withFailureHandler(() => { $('seguir').disabled = false; mostrar('avisoRut', 'No se pudo revisar el RUT. Revisa tu conexión e intenta de nuevo.'); })
+      .verificarRut(r);
+  }
+  $('seguir').addEventListener('click', verificar);
+  $('rut').addEventListener('keydown', e => { if (e.key === 'Enter') verificar(); });
+  $('rut').addEventListener('input', () => mostrar('avisoRut', ''));
+
+  // ---- Paso 2: asistencia ----
+  $('pasoAsistencia').addEventListener('click', e => {
+    const b = e.target.closest('[data-asiste]');
+    if (!b) return;
+    const respuesta = b.dataset.asiste;
+    $('pasoAsistencia').querySelectorAll('[data-asiste]').forEach(x => { x.disabled = true; });
+    mostrar('avisoAsistencia', '');
+    google.script.run
+      .withSuccessHandler(() => {
+        $('pasoAsistencia').classList.remove('activo');
+        $('pasoAsistencia').classList.add('hecho-ok');
+        $('pasoAsistencia').querySelector('.dos').hidden = true;
+        if (respuesta === 'no') {
+          $('pasoNoAsiste').hidden = false;
+          $('pasoNoAsiste').scrollIntoView({ block: 'start', behavior: 'smooth' });
+          return;
+        }
+        $('asistenciaLista').hidden = false;
+        $('pasoFotos').hidden = false;
+        $('pasoFotos').scrollIntoView({ block: 'start', behavior: 'smooth' });
+      })
+      .withFailureHandler(() => {
+        $('pasoAsistencia').querySelectorAll('[data-asiste]').forEach(x => { x.disabled = false; });
+        mostrar('avisoAsistencia', 'No se pudo guardar tu respuesta. Revisa tu conexión e intenta de nuevo.');
+      })
+      .confirmarAsistencia(rut, respuesta);
+  });
+
+  // ---- Paso 3: elegir fotos ----
+  // Se leen los metadatos para registrarlos en la planilla; a la persona solo se le avisa
+  // si la foto no es de esta semana o si parece una captura o una foto reenviada.
+  // Las fotos que se eligen se suman a las anteriores; cada una se puede quitar con la ×.
+  const MAXIMO = 10;
+  let siguienteId = 0;
+
+  // En iPhone, después de tocar "Agregar" en la galería, el teléfono prepara las fotos durante
+  // varios segundos antes de entregarlas a la página: mientras tanto el botón lo dice.
+  let reloj = null;
+  function cargando(si) {
+    $('elegir').classList.toggle('cargando', si);
+    $('elegirTexto').textContent = si ? 'Preparando tus fotos…' : lecturas.length ? 'Agregar fotos' : 'Elegir fotos';
+    clearTimeout(reloj);
+    if (si) reloj = setTimeout(() => cargando(false), 60000);   // por si el navegador no avisa que se canceló
+  }
+  $('fotos').addEventListener('click', () => cargando(true));
+  $('fotos').addEventListener('cancel', () => cargando(false));
+
+  // Lectura liviana: solo los bloques donde están la fecha, el modelo y la ubicación
+  const OPCIONES_EXIF = { tiff: true, exif: true, gps: true, ifd1: false, interop: false, xmp: false, icc: false, iptc: false, jfif: false, ihdr: false, makerNote: false, userComment: false };
+  async function leer(item) {
+    let m = null;
+    try { m = await exifr.parse(item.file, OPCIONES_EXIF); } catch (e) {}
+    const fecha = m && m.DateTimeOriginal instanceof Date ? m.DateTimeOriginal : null;
+    item.visto = {
+      nombre: item.file.name, tipo: item.file.type || '?', bytes: item.file.size,
+      gps: !!(m && m.latitude != null),
+      fecha: fecha ? fecha.toISOString() : null,
+      modelo: m && m.Model ? `${m.Make || ''} ${m.Model}`.trim() : null,
+      navegador: navigator.userAgent,
+    };
+    item.leida = true;
+  }
+
+  function alertaDe(item, n) {
+    if (!item.leida) return '';
+    const hace8dias = Date.now() - 8 * 24 * 3600 * 1000;
+    const fecha = item.visto.fecha ? new Date(item.visto.fecha) : null;
+    if (!item.visto.modelo) return `Foto ${n}: parece una captura de pantalla o una foto reenviada. Si puedes, quítala y elige otra.`;
+    if (fecha && fecha.getTime() < hace8dias) return `Foto ${n}: es del ${fecha.getDate()} de ${MESES[fecha.getMonth()]}, no de esta semana.`;
+    return '';
+  }
+
+  // Dibuja la grilla, los avisos y los botones según las fotos elegidas
+  function pintar() {
+    const avisos = [];
+    $('grilla').innerHTML = lecturas.map((item, i) => {
+      const alerta = alertaDe(item, i + 1);
+      if (alerta) avisos.push(alerta);
+      return `<div class="foto" id="${item.id}" data-estado="lista-para-subir">
+        <img src="${item.url}" alt="Foto ${i + 1}" onerror="this.outerHTML='<span class=&quot;sin&quot;>${esc(item.file.name)}</span>'">
+        <button type="button" class="quitar" data-quitar="${item.id}" aria-label="Quitar la foto ${i + 1}">×</button>
+        ${alerta ? '<span class="alerta" title="Revisa esta foto">!</span>' : ''}
+        <span class="estado">${item.leida ? `Foto ${i + 1}` : 'Leyendo…'}</span></div>`;
+    }).join('');
+    $('avisos').innerHTML = avisos.map(a => `<li>${esc(a)}</li>`).join('');
+    $('avisos').hidden = !avisos.length;
+
+    const total = lecturas.length, leyendo = lecturas.some(x => !x.leida);
+    mostrar('cuenta', total ? `${total} de 7 fotos elegidas.${total < MAXIMO ? ' Puedes agregar más o quitar alguna con la ×.' : ''}` : '');
+    mostrar('avisoFotos', total > MAXIMO ? `Elige máximo ${MAXIMO} fotos: quita ${total - MAXIMO}.` : total && total < 7 ? `Elegiste ${total}. Lo ideal son 7, pero puedes subirlas igual.` : '');
+    if (!$('elegir').classList.contains('cargando')) $('elegirTexto').textContent = total ? 'Agregar fotos' : 'Elegir fotos';
+    $('subir').hidden = total === 0;
+    $('subir').disabled = total > MAXIMO || leyendo;
+    $('subirTexto').textContent = leyendo ? 'Leyendo las fotos…' : total === 1 ? 'Subir 1 foto' : `Subir ${total} fotos`;
+  }
+
+  $('fotos').addEventListener('change', async () => {
+    cargando(false);
+    $('progreso').hidden = true;
+    // Se suman a las ya elegidas, sin repetir la misma foto
+    const ya = new Set(lecturas.map(x => `${x.file.name}|${x.file.size}|${x.file.lastModified}`));
+    const nuevas = [...$('fotos').files]
+      .filter(f => !ya.has(`${f.name}|${f.size}|${f.lastModified}`))
+      .map(file => ({ file, id: 'f' + (++siguienteId), url: URL.createObjectURL(file), leida: false, visto: null }));
+    $('fotos').value = '';   // así se puede volver a elegir la misma foto después de quitarla
+    lecturas.push(...nuevas);
+    pintar();   // las miniaturas aparecen al tiro; los metadatos se leen en paralelo
+    await Promise.all(nuevas.map(leer));
+    pintar();
+  });
+
+  $('grilla').addEventListener('click', e => {
+    const b = e.target.closest('[data-quitar]');
+    if (!b || $('grilla').classList.contains('bloqueada')) return;
+    const i = lecturas.findIndex(x => x.id === b.dataset.quitar);
+    if (i < 0) return;
+    URL.revokeObjectURL(lecturas[i].url);
+    lecturas.splice(i, 1);
+    pintar();
+  });
+
+  function base64(blob) {
+    return new Promise((ok, mal) => {
+      const r = new FileReader();
+      r.onload = () => ok(r.result.split(',')[1]);
+      r.onerror = mal;
+      r.readAsDataURL(blob);
+    });
+  }
+
+  function subirUna(archivo) {
+    return new Promise((ok, mal) =>
+      google.script.run.withSuccessHandler(ok).withFailureHandler(mal).subir(archivo));
+  }
+
+  // ---- Compresión que conserva los metadatos ----
+  // La foto se achica a LADO_MAX px y se recodifica en JPG. Como el canvas borra el EXIF,
+  // se copia el bloque EXIF (APP1) del original al JPG nuevo. Si después de eso la foto
+  // perdió GPS o fecha, se sube la original. Las fotos que no son JPG (HEIC) suben tal cual.
+  const LADO_MAX = 2048, CALIDAD = 0.82, EN_PARALELO = 3;
+
+  // Devuelve el segmento APP1 "Exif" completo (marca + largo + datos) de un JPG
+  function segmentoExif(buf) {
+    const v = new DataView(buf);
+    if (v.byteLength < 4 || v.getUint16(0) !== 0xFFD8) return null;
+    let i = 2;
+    while (i + 8 <= v.byteLength && v.getUint8(i) === 0xFF) {
+      const marca = v.getUint8(i + 1);
+      if (marca === 0xDA || marca === 0xD9) return null;
+      const largo = v.getUint16(i + 2);
+      if (marca === 0xE1 && v.getUint32(i + 4) === 0x45786966) return new Uint8Array(buf.slice(i, i + 2 + largo));
+      i += 2 + largo;
+    }
+    return null;
+  }
+
+  // El canvas ya dibujó la foto derecha: la orientación del EXIF copiado pasa a 1 (normal)
+  function orientacionNormal(app1) {
+    const v = new DataView(app1.buffer, app1.byteOffset, app1.byteLength);
+    const t = 10; // FF E1 + largo (2) + "Exif\0\0" (6)
+    const le = v.getUint16(t) === 0x4949;
+    const ifd0 = t + v.getUint32(t + 4, le);
+    const n = v.getUint16(ifd0, le);
+    for (let k = 0; k < n; k++) {
+      const e = ifd0 + 2 + k * 12;
+      if (v.getUint16(e, le) === 0x0112) { v.setUint16(e + 8, 1, le); return; }
+    }
+  }
+
+  // Inserta el APP1 después del inicio del JPG nuevo, en lugar del APP0 (JFIF) que pone el canvas
+  function conExif(jpg, app1) {
+    const b = new Uint8Array(jpg);
+    const desde = b[2] === 0xFF && b[3] === 0xE0 ? 4 + ((b[4] << 8) | b[5]) : 2;
+    const out = new Uint8Array(2 + app1.length + b.length - desde);
+    out.set([0xFF, 0xD8], 0);
+    out.set(app1, 2);
+    out.set(b.subarray(desde), 2 + app1.length);
+    return out;
+  }
+
+  async function comprimir(file, visto) {
+    const original = { blob: file, comprimida: false };
+    try {
+      const esJpg = /jpe?g/i.test(file.type) || /\.jpe?g$/i.test(file.name);
+      if (!esJpg || file.size < 900e3) return original;
+      const app1 = segmentoExif(await file.arrayBuffer());
+      const img = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => createImageBitmap(file));
+      const escala = Math.min(1, LADO_MAX / Math.max(img.width, img.height));
+      const lienzo = document.createElement('canvas');
+      lienzo.width = Math.round(img.width * escala);
+      lienzo.height = Math.round(img.height * escala);
+      lienzo.getContext('2d').drawImage(img, 0, 0, lienzo.width, lienzo.height);
+      const nuevo = await new Promise(ok => lienzo.toBlob(ok, 'image/jpeg', CALIDAD));
+      if (!nuevo || nuevo.size >= file.size) return original;
+
+      let final = nuevo;
+      if (app1) {
+        const copia = app1.slice();
+        orientacionNormal(copia);
+        final = new Blob([conExif(await nuevo.arrayBuffer(), copia)], { type: 'image/jpeg' });
+      }
+      // Comprobación: la versión liviana tiene que conservar lo que traía la original
+      if (visto.gps || visto.fecha) {
+        const m = await exifr.parse(final).catch(() => null);
+        if (visto.gps && !(m && m.latitude != null)) return original;
+        if (visto.fecha && !(m && m.DateTimeOriginal)) return original;
+      }
+      return { blob: final, comprimida: true };
+    } catch (e) {
+      return original;
+    }
+  }
+
+  // ---- Subida ----
+  function marcarFoto(id, estado, texto) {
+    const el = $(id);
+    el.dataset.estado = estado;
+    el.querySelector('.estado').textContent = texto;
+  }
+
+  function progreso(listas, total) {
+    $('relleno').style.width = `${Math.round(listas / total * 100)}%`;
+    $('textoProgreso').textContent = listas < total
+      ? `Subiendo ${listas} de ${total}… no cierres esta página.`
+      : `${total} de ${total} fotos subidas.`;
+  }
+
+  $('subir').addEventListener('click', async () => {
+    $('subir').disabled = true;
+    $('elegir').hidden = true;
+    $('cuenta').hidden = true;
+    $('fotos').disabled = true;
+    $('grilla').classList.add('bloqueada');   // una vez que empieza la subida ya no se quitan fotos
+    mostrar('avisoFotos', '');
+    const pendientes = lecturas.filter(x => $(x.id).dataset.estado !== 'lista');
+    const total = lecturas.length;
+    $('progreso').hidden = false;
+    progreso(subidas, total);
+    pendientes.forEach(x => marcarFoto(x.id, 'esperando', 'En espera'));
+
+    // Varias fotos a la vez: cada "trabajador" toma la siguiente foto pendiente
+    let siguiente = 0;
+    const fallidas = [];
+    async function trabajador() {
+      while (siguiente < pendientes.length) {
+        const { file, visto, id } = pendientes[siguiente++];
+        marcarFoto(id, 'subiendo', 'Subiendo…');
+        try {
+          const { blob, comprimida } = await comprimir(file, visto);
+          await subirUna({ rut, telefono, nombre: file.name, tipo: blob.type || file.type || 'application/octet-stream',
+                           datos: await base64(blob), visto: { ...visto, comprimida, bytesSubidos: blob.size } });
+          subidas++;
+          marcarFoto(id, 'lista', '✓ Lista');
+          progreso(subidas, total);
+        } catch (e) {
+          fallidas.push(id);
+          marcarFoto(id, 'error', 'No subió');
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(EN_PARALELO, pendientes.length) }, trabajador));
+
+    if (fallidas.length) {
+      $('textoProgreso').textContent = `Se subieron ${subidas} de ${total}. ${fallidas.length === 1 ? 'Falta 1' : `Faltan ${fallidas.length}`}: revisa tu conexión y toca "Reintentar".`;
+      $('subirTexto').textContent = 'Reintentar';
+      $('subir').disabled = false;
+      return;
+    }
+
+    $('subir').hidden = true;
+    $('textoFinal').textContent = `Te esperamos ${sesion.cuando}${sesion.lugar && !sesion.lugar.startsWith('[') ? `, en ${sesion.lugar}` : ''}.`;
+    $('tituloFinal').textContent = total === 1 ? 'Recibimos tu foto' : `Recibimos tus ${total} fotos`;
+    $('velo').hidden = false;
+    $('cerrar').focus();
+  });
+
+  $('cerrar').addEventListener('click', () => { $('velo').hidden = true; });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') $('velo').hidden = true; });
+</script>
+</body>
+</html>

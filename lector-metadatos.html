@@ -1,0 +1,317 @@
+<title>Lector de metadatos rastro</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
+<style>
+  /* Layout: visor de una foto a la vez; a la derecha (abajo en el teléfono) comuna y fecha; tira de fotos y recorrido debajo */
+  :root {
+    --paper: #f1f2ef;
+    --sheet: #fbfbf9;
+    --ink: #16181a;
+    --muted: #5a6067;
+    --line: #d3d6d0;
+    --accent: #2f45c8;
+    --miss: #b42318;
+    --shape: #dfe3f7;
+    --display: "Archivo", "Arial Narrow", system-ui, sans-serif;
+    --body: "Archivo", system-ui, -apple-system, sans-serif;
+    --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #111315; --sheet: #181b1e; --ink: #e6e8e4; --muted: #9aa1a8; --line: #2c3035;
+      --accent: #93a3ff; --miss: #ff7d6e; --shape: #232a4a;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #111315; --sheet: #181b1e; --ink: #e6e8e4; --muted: #9aa1a8; --line: #2c3035;
+    --accent: #93a3ff; --miss: #ff7d6e; --shape: #232a4a;
+    color-scheme: dark;
+  }
+
+  body { background: var(--paper); color: var(--ink); font-family: var(--body); font-size: 15px; line-height: 1.5; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding-inline: 16px; padding-block: 24px 56px; display: grid; gap: 22px; }
+
+  header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 12px 20px; }
+  .eyebrow { font-family: var(--mono); font-size: 12px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  h1 { font-family: var(--display); font-stretch: 72%; font-weight: 800; font-size: clamp(30px, 6vw, 46px); line-height: .95; margin: 4px 0 0; }
+  .privado { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+
+  .btn { font: 600 14px/1 var(--body); background: var(--accent); color: var(--sheet); border: 0; border-radius: 4px; padding: 11px 16px; cursor: pointer; }
+  .btn.sec { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  .btn:disabled { opacity: .35; cursor: default; }
+  .btn:focus-visible, .mini:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  #archivos { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+  .visor { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); background: var(--sheet); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .visor.over { outline: 2px dashed var(--accent); outline-offset: -6px; }
+  .foto { background: var(--paper); display: grid; grid-template-rows: minmax(0, 1fr) auto; min-height: 340px; }
+  .foto-img { display: grid; place-items: center; padding: 12px; min-height: 0; }
+  .foto-img img { max-height: 420px; width: auto; max-width: 100%; border-radius: 3px; }
+  .foto-img .sin { color: var(--muted); font-size: 13px; text-align: center; max-width: 30ch; }
+  .nav { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 12px; border-top: 1px solid var(--line); }
+  .nav .cual { font-family: var(--mono); font-size: 13px; text-align: center; min-width: 0; overflow-wrap: anywhere; }
+
+  .datos { padding: 20px; display: grid; gap: 20px; align-content: start; min-width: 0; }
+  .dato { display: grid; gap: 4px; }
+  .rotulo { font-family: var(--mono); font-size: 11.5px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+  .grande { font-family: var(--display); font-stretch: 78%; font-weight: 800; font-size: clamp(30px, 5vw, 42px); line-height: 1; text-wrap: balance; }
+  .grande.falta { color: var(--miss); }
+  .sub { color: var(--muted); font-size: 14px; }
+  .mono { font-family: var(--mono); font-size: 13px; font-variant-numeric: tabular-nums; }
+  .mapa { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 14px; align-items: center; }
+  .mapa svg { width: 120px; height: 120px; max-width: 100%; }
+  .mapa svg path { fill: var(--shape); stroke: var(--accent); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+  .mapa svg circle.punto { fill: var(--accent); }
+  .mapa svg circle.halo { fill: none; stroke: var(--accent); stroke-width: 1; vector-effect: non-scaling-stroke; opacity: .5; }
+  .mapa a { color: var(--accent); font-size: 13px; }
+  .ejemplo { font-family: var(--mono); font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--accent); border: 1px solid var(--accent); border-radius: 3px; padding: 1px 6px; justify-self: start; }
+
+  .tira { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+  .mini { flex: 0 0 auto; width: 76px; display: grid; gap: 4px; background: none; border: 0; padding: 0; cursor: pointer; color: var(--ink); text-align: left; }
+  .mini .cuadro { width: 76px; height: 76px; border-radius: 4px; background: var(--sheet); border: 2px solid var(--line); overflow: hidden; display: grid; place-items: center; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+  .mini .cuadro img { width: 100%; height: 100%; object-fit: cover; }
+  .mini[aria-current="true"] .cuadro { border-color: var(--accent); }
+  .mini span { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  section { display: grid; gap: 10px; min-width: 0; }
+  h2 { font-family: var(--display); font-stretch: 80%; font-weight: 750; font-size: 20px; margin: 0; }
+  .tabla { overflow-x: auto; background: var(--sheet); border: 1px solid var(--line); border-radius: 6px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+  th, td { padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; white-space: nowrap; }
+  th { font-family: var(--mono); font-weight: 500; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+  tr:last-child td { border-bottom: 0; }
+  td.falta { color: var(--miss); }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover td { background: var(--paper); }
+
+  @media (max-width: 720px) {
+    .visor { grid-template-columns: minmax(0, 1fr); }
+    .foto { min-height: 260px; }
+    .foto-img img { max-height: 300px; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <span class="eyebrow">rastro · prueba de canal</span>
+      <h1>Dónde y cuándo</h1>
+      <span class="privado">Las fotos se leen en este navegador. No se suben a ningún lado.</span>
+    </div>
+    <label class="btn" for="archivos">Elegir fotos</label>
+    <input id="archivos" type="file" accept="image/*,.heic,.heif" multiple>
+  </header>
+
+  <div class="visor" id="visor">
+    <div class="foto">
+      <div class="foto-img" id="fotoImg"></div>
+      <div class="nav">
+        <button class="btn sec" id="ant" aria-label="Foto anterior">←</button>
+        <span class="cual" id="cual"></span>
+        <button class="btn sec" id="sig" aria-label="Foto siguiente">→</button>
+      </div>
+    </div>
+    <div class="datos" id="datos"></div>
+  </div>
+
+  <div class="tira" id="tira" hidden></div>
+
+  <section id="recorrido" hidden>
+    <h2>Recorrido</h2>
+    <div class="tabla"><table>
+      <thead><tr><th>Fecha</th><th>Hora</th><th>Comuna</th><th>Foto</th></tr></thead>
+      <tbody id="filas"></tbody>
+    </table></div>
+  </section>
+</div>
+
+<script>
+  const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
+  const MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+  // Ejemplo real (IMG_6459.HEIC), sin coordenadas
+  const EJEMPLO = { ejemplo: true, nombre: 'IMG_6459.HEIC', url: null, lat: null, lon: null, gps: true,
+                    comunaFija: { comuna: 'Santiago', provincia: 'Santiago', region: 'Región Metropolitana de Santiago' },
+                    fecha: '2026:10:07 13:33:35', zona: '-03:00', error: 16 };
+
+  let fotos = [EJEMPLO];
+  let actual = 0;
+  let comunas = null;
+
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+  // ---- Comunas: polígonos de la BCN, cruce punto-polígono en el navegador ----
+  async function cargarComunas() {
+    try {
+      const r = await fetch('comunas.json');
+      const geo = await r.json();
+      comunas = geo.features.map(f => {
+        const polys = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
+        let minX = 180, minY = 90, maxX = -180, maxY = -90;
+        polys.forEach(p => p[0].forEach(([x, y]) => { minX = Math.min(minX, x); maxX = Math.max(maxX, x); minY = Math.min(minY, y); maxY = Math.max(maxY, y); }));
+        return { ...f.properties, polys, caja: [minX, minY, maxX, maxY] };
+      });
+    } catch (e) {
+      comunas = [];
+    }
+    fotos.forEach(f => { f.comuna = buscarComuna(f); });
+    pintar();
+  }
+
+  function enAnillo(x, y, r) {
+    let dentro = false;
+    for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+      const [xi, yi] = r[i], [xj, yj] = r[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) dentro = !dentro;
+    }
+    return dentro;
+  }
+
+  function buscarComuna(f) {
+    if (f.comunaFija) return f.comunaFija;
+    if (f.lat == null || !comunas) return null;
+    const x = f.lon, y = f.lat;
+    return comunas.find(c => x >= c.caja[0] && x <= c.caja[2] && y >= c.caja[1] && y <= c.caja[3] &&
+      c.polys.some(p => enAnillo(x, y, p[0]) && !p.slice(1).some(h => enAnillo(x, y, h)))) || false;
+  }
+
+  // Dibuja el contorno de la comuna con el punto de la foto
+  function mapaSVG(c, lat, lon) {
+    if (!c || !c.polys) return '';
+    const k = Math.cos(c.caja[1] * Math.PI / 180);
+    const [x0, y0, x1, y1] = c.caja;
+    const w = (x1 - x0) * k, h = y1 - y0, lado = Math.max(w, h) * 1.08;
+    const px = x => ((x - x0) * k + (lado - w) / 2) / lado * 100;
+    const py = y => ((y1 - y) + (lado - h) / 2) / lado * 100;
+    const d = c.polys.map(p => p.map(r => 'M' + r.map(([x, y]) => px(x).toFixed(2) + ' ' + py(y).toFixed(2)).join('L') + 'Z').join('')).join('');
+    const punto = lat != null ? `<circle class="halo" cx="${px(lon).toFixed(2)}" cy="${py(lat).toFixed(2)}" r="6"/><circle class="punto" cx="${px(lon).toFixed(2)}" cy="${py(lat).toFixed(2)}" r="2.6"/>` : '';
+    return `<svg viewBox="0 0 100 100" role="img" aria-label="Contorno de ${esc(c.comuna)} con el punto de la foto"><path d="${d}" fill-rule="evenodd"/>${punto}</svg>`;
+  }
+
+  // ---- Fecha y hora ----
+  function partesFecha(s) {
+    const m = s && s.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2})/);
+    if (!m) return null;
+    const [, y, mo, d, hh, mm] = m.map(Number);
+    return { y, mo, d, hh, mm, dia: DIAS[new Date(y, mo - 1, d).getDay()] };
+  }
+  const dosDig = n => String(n).padStart(2, '0');
+
+  // ---- Lectura de cada foto ----
+  async function leer(file) {
+    let exif = null, gps = null;
+    try { exif = await exifr.parse(file, { tiff: true, exif: true, gps: true, xmp: false, icc: false, iptc: false, reviveValues: false }); } catch (e) {}
+    try { gps = await exifr.gps(file); } catch (e) {}
+    const f = {
+      nombre: file.name, url: URL.createObjectURL(file),
+      lat: gps && typeof gps.latitude === 'number' ? gps.latitude : null,
+      lon: gps && typeof gps.longitude === 'number' ? gps.longitude : null,
+      fecha: exif && exif.DateTimeOriginal || null,
+      zona: exif && exif.OffsetTimeOriginal || null,
+      error: exif && typeof exif.GPSHPositioningError === 'number' ? exif.GPSHPositioningError : null,
+    };
+    f.gps = f.lat != null;
+    f.comuna = buscarComuna(f);
+    return f;
+  }
+
+  async function cargar(lista) {
+    const nuevas = [];
+    for (const file of lista) nuevas.push(await leer(file));
+    if (!nuevas.length) return;
+    fotos.forEach(f => f.url && URL.revokeObjectURL(f.url));
+    fotos = nuevas;
+    actual = 0;
+    pintar();
+  }
+
+  // ---- Pintar ----
+  function pintar() {
+    const f = fotos[actual];
+    document.getElementById('cual').textContent = `${f.nombre} · ${actual + 1} de ${fotos.length}`;
+    document.getElementById('ant').disabled = actual === 0;
+    document.getElementById('sig').disabled = actual === fotos.length - 1;
+
+    document.getElementById('fotoImg').innerHTML = f.url
+      ? `<img src="${f.url}" alt="${esc(f.nombre)}" onerror="this.outerHTML='<p class=&quot;sin&quot;>Este navegador no muestra fotos HEIC. Los datos se leen igual (Safari sí las muestra).</p>'">`
+      : `<p class="sin">Ejemplo sin imagen. Elige tus fotos para verlas aquí.</p>`;
+
+    // Ubicación
+    let ubic;
+    if (!f.gps) {
+      ubic = `<div class="grande falta">Sin ubicación</div><p class="sub">La foto no trae coordenadas GPS: se borraron en el canal o la cámara no las guardó.</p>`;
+    } else if (f.comuna === undefined || (f.comuna === null && !comunas)) {
+      ubic = `<div class="grande">…</div><p class="sub">Cargando el mapa de comunas.</p>`;
+    } else if (comunas && !comunas.length) {
+      ubic = `<div class="grande falta">Sin mapa de comunas</div><p class="sub">No se pudo cargar el archivo de comunas. Recarga la página.</p>`;
+    } else if (!f.comuna) {
+      ubic = `<div class="grande falta">Fuera de las comunas</div><p class="sub">Tiene coordenadas, pero no caen dentro de ninguna comuna de Chile (puede ser el mar o el extranjero).</p>`;
+    } else {
+      const c = f.comuna;
+      const coords = f.lat != null
+        ? `<span class="mono">${f.lat.toFixed(6)}, ${f.lon.toFixed(6)}</span>${f.error != null ? `<span class="sub">Margen de error ± ${Math.round(f.error)} m</span>` : ''}<a href="https://www.google.com/maps?q=${f.lat.toFixed(7)},${f.lon.toFixed(7)}" target="_blank" rel="noopener">Ver en Google Maps</a>`
+        : `<span class="sub">Coordenadas ocultas en el ejemplo.</span>`;
+      const comunaGeo = comunas && comunas.find(x => x.comuna === c.comuna);
+      ubic = `<div class="grande">${esc(c.comuna)}</div>
+        <p class="sub">${esc(c.provincia)} · ${esc(c.region)}</p>
+        <div class="mapa">${mapaSVG(comunaGeo, f.lat, f.lon)}<div style="display:grid;gap:4px;min-width:0">${coords}</div></div>`;
+    }
+
+    // Fecha
+    const p = partesFecha(f.fecha);
+    const fecha = p
+      ? `<div class="grande">${p.dia} ${p.d} de ${MESES[p.mo - 1]}</div>
+         <p class="sub"><span class="mono" style="font-size:15px;color:var(--ink)">${dosDig(p.hh)}:${dosDig(p.mm)}</span> · ${p.y}${f.zona ? ` · zona horaria ${esc(f.zona)}` : ' · sin zona horaria'}</p>`
+      : `<div class="grande falta">Sin fecha</div><p class="sub">La foto no trae la fecha de captura.</p>`;
+
+    document.getElementById('datos').innerHTML = `
+      ${f.ejemplo ? '<span class="ejemplo">Ejemplo · elige tus fotos</span>' : ''}
+      <div class="dato"><span class="rotulo">Dónde · comuna</span>${ubic}</div>
+      <div class="dato"><span class="rotulo">Cuándo · fecha y hora</span>${fecha}</div>`;
+
+    // Tira
+    const tira = document.getElementById('tira');
+    tira.hidden = fotos.length < 2;
+    tira.innerHTML = fotos.map((x, i) => `<button class="mini" data-i="${i}" aria-current="${i === actual}">
+      <div class="cuadro">${x.url ? `<img src="${x.url}" alt="" onerror="this.outerHTML='HEIC'">` : ''}</div>
+      <span>${esc(x.comuna ? x.comuna.comuna : x.gps ? '…' : 'sin ubicación')}</span></button>`).join('');
+    const sel = tira.querySelector('[aria-current="true"]');
+    if (sel) sel.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+
+    // Recorrido ordenado por fecha
+    const rec = document.getElementById('recorrido');
+    rec.hidden = fotos.length < 2;
+    const orden = fotos.map((x, i) => ({ x, i })).sort((a, b) => (a.x.fecha || '9').localeCompare(b.x.fecha || '9'));
+    document.getElementById('filas').innerHTML = orden.map(({ x, i }) => {
+      const q = partesFecha(x.fecha);
+      const com = x.comuna ? esc(x.comuna.comuna) : x.gps ? '…' : 'sin ubicación';
+      return `<tr data-i="${i}">
+        <td class="${q ? '' : 'falta'}">${q ? `${q.dia} ${q.d} ${MESES[q.mo - 1].slice(0, 3)}` : 'sin fecha'}</td>
+        <td class="mono">${q ? `${dosDig(q.hh)}:${dosDig(q.mm)}` : '—'}</td>
+        <td class="${x.comuna ? '' : 'falta'}">${com}</td>
+        <td class="mono">${esc(x.nombre)}</td></tr>`;
+    }).join('');
+  }
+
+  function ir(i) { if (i >= 0 && i < fotos.length) { actual = i; pintar(); } }
+
+  document.getElementById('archivos').addEventListener('change', e => { cargar(e.target.files); e.target.value = ''; });
+  document.getElementById('ant').addEventListener('click', () => ir(actual - 1));
+  document.getElementById('sig').addEventListener('click', () => ir(actual + 1));
+  document.getElementById('tira').addEventListener('click', e => { const b = e.target.closest('[data-i]'); if (b) ir(+b.dataset.i); });
+  document.getElementById('filas').addEventListener('click', e => { const r = e.target.closest('[data-i]'); if (r) ir(+r.dataset.i); });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft') ir(actual - 1);
+    if (e.key === 'ArrowRight') ir(actual + 1);
+  });
+  const visor = document.getElementById('visor');
+  ['dragenter', 'dragover'].forEach(t => visor.addEventListener(t, e => { e.preventDefault(); visor.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(t => visor.addEventListener(t, e => { e.preventDefault(); visor.classList.remove('over'); }));
+  visor.addEventListener('drop', e => cargar(e.dataTransfer.files));
+
+  pintar();
+  cargarComunas();
+</script>

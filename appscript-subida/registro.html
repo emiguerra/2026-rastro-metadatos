@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&display=swap">
+  <style>
+    /* Blanco, negro y un verde ácido. El verde marca lo activo: la pregunta que se
+       responde, lo elegido y el envío. Medidas en rem para que escalen con el texto. */
+    :root {
+      --blanco: #ffffff;
+      --negro: #0b0b0b;
+      --verde: #c6f21c;
+      --tenue: rgba(11, 11, 11, .5);
+      --sans: "Inter Tight", "Helvetica Neue", Helvetica, Arial, sans-serif;
+      --radio: 1.5rem;
+      color-scheme: light;
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; background: var(--blanco); color: var(--negro); font: 500 1rem/1.45 var(--sans); -webkit-font-smoothing: antialiased; }
+    main { max-width: 72rem; margin: 0 auto; padding-inline: 1rem; padding-block: 1.25rem 3rem; display: grid; grid-template-columns: minmax(0, 1fr); gap: .75rem; }
+
+    .barra { display: flex; justify-content: space-between; align-items: baseline; font-size: 1.25rem; letter-spacing: -.02em; padding-bottom: .5rem; }
+    .barra b { font-weight: 600; }
+    .tenue { color: var(--tenue); }
+
+    /* Presentación */
+    .portada { background: var(--negro); color: var(--blanco); border-radius: var(--radio); padding: 1.5rem; display: grid; gap: 1.5rem; align-content: start; }
+    .portada small { font-size: .8rem; color: rgba(255, 255, 255, .6); }
+    .portada h1 { font-size: clamp(2.5rem, 9vw, 4.5rem); font-weight: 700; letter-spacing: -.05em; line-height: .92; margin: 0; }
+    .portada h1 span { color: var(--verde); }
+    .portada p { margin: 0; color: rgba(255, 255, 255, .82); max-width: 40ch; }
+    .hechos { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid rgba(255, 255, 255, .25); padding-top: 1rem; }
+    .hecho { display: grid; gap: .15rem; min-width: 0; }
+    .hecho + .hecho { border-left: 1px solid rgba(255, 255, 255, .25); padding-left: .9rem; }
+    .hecho b { font-size: clamp(1.4rem, 5.5vw, 2.25rem); font-weight: 600; letter-spacing: -.04em; line-height: 1; font-variant-numeric: tabular-nums; }
+    .hecho span { font-size: .8rem; color: rgba(255, 255, 255, .6); }
+
+    /* Preguntas */
+    form { display: grid; gap: .75rem; }
+    .pregunta { border: 1.5px solid var(--negro); border-radius: var(--radio); padding: 1.25rem 1.25rem 1.4rem; display: grid; gap: .6rem; margin: 0; min-width: 0; transition: background .15s; }
+    .pregunta:focus-within { background: var(--verde); }
+    .pregunta.mal, .condiciones.mal { border-width: 3px; }
+    .num { font-size: .85rem; font-weight: 600; color: var(--tenue); font-variant-numeric: tabular-nums; }
+    .pregunta:focus-within .num, .pregunta:focus-within .ayuda { color: var(--negro); }
+    .titulo { font-size: 1.5rem; font-weight: 700; letter-spacing: -.035em; line-height: 1.1; padding: 0; margin: 0; }
+    .ayuda { font-size: .85rem; color: var(--tenue); margin: 0; }
+    .aviso { font-size: .9rem; font-weight: 600; margin: 0; }
+    .aviso::before { content: "↳ "; }
+
+    input[type=text], input[type=email] { font: 600 1.25rem var(--sans); letter-spacing: -.02em; color: var(--negro); background: transparent; border: 0; border-bottom: 1.5px solid var(--negro); border-radius: 0; padding: .5rem 0 .4rem; width: 100%; }
+    input[type=text]::placeholder, input[type=email]::placeholder { color: var(--negro); opacity: .28; }
+    input[type=text]:focus, input[type=email]:focus { outline: none; border-bottom-width: 3px; }
+    .campos { display: grid; gap: .9rem; }
+    .campo { display: grid; gap: .1rem; }
+    .campo span { font-size: .8rem; font-weight: 600; color: var(--tenue); }
+    .pregunta:focus-within .campo span { color: var(--negro); }
+
+    .opciones { display: flex; gap: .5rem; }
+    .opcion input { position: absolute; opacity: 0; pointer-events: none; }
+    .opcion span { display: inline-block; min-width: 5.5rem; text-align: center; font-weight: 600; padding: .65rem 1.25rem; border: 1.5px solid var(--negro); border-radius: 999px; cursor: pointer; background: var(--blanco); }
+    .opcion input:checked + span { background: var(--negro); color: var(--verde); }
+    .opcion input:focus-visible + span { outline: 2px solid var(--negro); outline-offset: 3px; }
+
+    /* Condiciones */
+    .condiciones { border: 1.5px solid var(--negro); border-radius: var(--radio); padding: 1.25rem; display: grid; gap: .75rem; font-size: .9rem; }
+    .condiciones h2 { font-size: 1.15rem; font-weight: 700; letter-spacing: -.02em; margin: 0; }
+    .condiciones ul { margin: 0; padding-left: 1.1rem; display: grid; gap: .4rem; color: rgba(11, 11, 11, .82); }
+    .acepto { display: flex; gap: .75rem; align-items: center; font-weight: 600; cursor: pointer; padding-top: .25rem; }
+    .acepto input { position: absolute; opacity: 0; pointer-events: none; }
+    .caja { flex: 0 0 auto; width: 1.6rem; height: 1.6rem; border: 1.5px solid var(--negro); border-radius: .4rem; display: grid; place-items: center; line-height: 1; background: var(--blanco); }
+    .acepto input:checked + .caja { background: var(--verde); }
+    .acepto input:checked + .caja::after { content: "✓"; font-weight: 700; }
+    .acepto input:focus-visible + .caja { outline: 2px solid var(--negro); outline-offset: 3px; }
+
+    .enviar { width: 100%; background: var(--verde); color: var(--negro); border: 1.5px solid var(--negro); border-radius: 999px; padding: 1rem 1.5rem; font: 600 1.15rem var(--sans); cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    .enviar:hover { background: var(--negro); color: var(--verde); }
+    .enviar:disabled { opacity: .5; cursor: default; }
+    .enviar:focus-visible { outline: 3px solid var(--negro); outline-offset: 3px; }
+    .falla { font-size: .9rem; font-weight: 600; margin: 0; }
+
+    .listo { background: var(--verde); border: 1.5px solid var(--negro); border-radius: var(--radio); padding: 1.5rem; display: grid; gap: .75rem; align-content: start; }
+    .listo h2 { font-size: clamp(2rem, 7vw, 3rem); font-weight: 700; letter-spacing: -.045em; line-height: 1; margin: 0; }
+    .listo p { margin: 0; max-width: 38ch; }
+
+    /* Escritorio: presentación fija a la izquierda, preguntas a la derecha */
+    @media (min-width: 56rem) {
+      main { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 1rem; padding-inline: 1.75rem; padding-block: 1.5rem 4rem; }
+      .barra { grid-column: 1 / -1; font-size: 1.5rem; padding-bottom: 1rem; }
+      .portada { position: sticky; top: 1.5rem; align-self: start; padding: 2rem; min-height: calc(100vh - 7rem); align-content: space-between; }
+      .pregunta { padding: 1.5rem 1.75rem 1.75rem; }
+      .titulo { font-size: 1.85rem; }
+      .condiciones { padding: 1.5rem 1.75rem; }
+      .listo { padding: 2rem; min-height: 22rem; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <div class="barra"><span><b>rastro</b> <span class="tenue">testeo</span></span><span class="tenue">Diseño UDP</span></div>
+
+  <section class="portada">
+    <div style="display:grid;gap:1rem">
+      <small>Proyecto de título · Escuela de Diseño UDP</small>
+      <h1>Participa en un <span>testeo</span></h1>
+      <p>Estoy probando el prototipo de rastro, una instalación sobre redes sociales que funciona como un archivo colectivo de fotos. Busco 6 personas.</p>
+    </div>
+    <div class="hechos">
+      <div class="hecho"><b>14 oct</b><span>miércoles, mañana</span></div>
+      <div class="hecho"><b>15 min</b><span>duración</span></div>
+      <div class="hecho"><b>6</b><span>personas</span></div>
+    </div>
+  </section>
+
+  <div>
+    <form id="form" novalidate>
+      <fieldset class="pregunta" id="p-nombre">
+        <span class="num">01</span>
+        <legend class="titulo" style="float:left;width:100%">Nombre completo</legend>
+        <div class="campos">
+          <label class="campo"><span>Nombres</span><input type="text" id="nombres" autocomplete="given-name" placeholder="Ej: Ana María"></label>
+          <label class="campo"><span>Primer apellido</span><input type="text" id="apellido1" autocomplete="family-name" placeholder="Ej: Pérez"></label>
+          <label class="campo"><span>Segundo apellido</span><input type="text" id="apellido2" autocomplete="off" placeholder="Ej: Soto"></label>
+        </div>
+        <p class="aviso" hidden></p>
+      </fieldset>
+
+      <section class="pregunta" id="p-correo">
+        <span class="num">02</span>
+        <label class="titulo" for="correo">Correo</label>
+        <input type="email" id="correo" autocomplete="email" inputmode="email" placeholder="tu@correo.cl">
+        <p class="ayuda">Ahí te llegará la confirmación y el enlace para subir tus fotos.</p>
+        <p class="aviso" hidden></p>
+      </section>
+
+      <fieldset class="pregunta" id="p-mayor">
+        <span class="num">03</span>
+        <legend class="titulo" style="float:left;width:100%">¿Tienes 18 años o más?</legend>
+        <div class="opciones">
+          <label class="opcion"><input type="radio" name="mayor" value="sí"><span>Sí</span></label>
+          <label class="opcion"><input type="radio" name="mayor" value="no"><span>No</span></label>
+        </div>
+        <p class="aviso" hidden></p>
+      </fieldset>
+
+      <section class="pregunta" id="p-rut">
+        <span class="num">04</span>
+        <label class="titulo" for="rut">RUT</label>
+        <input type="text" id="rut" placeholder="12.345.678-9" autocomplete="off">
+        <p class="ayuda">Lo vas a usar para subir tus fotos.</p>
+        <p class="aviso" hidden></p>
+      </section>
+
+      <fieldset class="pregunta" id="p-disp">
+        <span class="num">05</span>
+        <legend class="titulo" style="float:left;width:100%">¿Puedes asistir el miércoles 14 de octubre en la mañana?</legend>
+        <p class="ayuda">Son 15 minutos. El horario exacto lo confirmo contigo.</p>
+        <div class="opciones">
+          <label class="opcion"><input type="radio" name="disp" value="sí"><span>Sí</span></label>
+          <label class="opcion"><input type="radio" name="disp" value="no"><span>No</span></label>
+        </div>
+        <p class="aviso" hidden></p>
+      </fieldset>
+
+      <!-- BORRADOR: revisar con el profesor guía antes de publicar. Completar [lugar] y [correo]. -->
+      <section class="condiciones" id="p-consent">
+        <h2>Antes de inscribirte</h2>
+        <ul>
+          <li>Antes de la sesión subirás 7 fotos de tu semana, tomadas con tu teléfono. Te enviaré el enlace.</li>
+          <li>La sesión es en [lugar], dura 15 minutos y se graba en video. Una semana después te haré dos preguntas por mensaje.</li>
+          <li>Uso tu nombre y correo solo para coordinar. Tu RUT, tus fotos y la información que contienen se usan en la experiencia y en el análisis; al final de la sesión te explico qué se usó y cómo.</li>
+          <li>En el análisis apareces con un código. Nada se publica con tu nombre ni tu RUT, y los datos se borran en diciembre de 2026.</li>
+          <li>Puedes retirarte cuando quieras escribiendo a [correo].</li>
+        </ul>
+        <label class="acepto">
+          <input type="checkbox" id="consentimiento">
+          <span class="caja" aria-hidden="true"></span>
+          Acepto participar en estas condiciones.
+        </label>
+        <p class="aviso" hidden></p>
+      </section>
+
+      <p class="falla" id="falla" hidden></p>
+      <button type="submit" class="enviar" id="enviar"><span id="enviarTexto">Inscribirme</span><span aria-hidden="true">→</span></button>
+    </form>
+
+    <section class="listo" id="listo" hidden>
+      <h2 id="listoTitulo">Listo, quedaste inscrita/o.</h2>
+      <p>Te escribiré a tu correo para confirmar el horario y enviarte el enlace para subir tus fotos. Ahí te pediré tu RUT.</p>
+    </section>
+  </div>
+</main>
+
+<script>
+  const $ = id => document.getElementById(id);
+
+  function rutValido(rut) {
+    const r = rut.replace(/[.\s-]/g, '').toUpperCase();
+    const m = r.match(/^(\d{7,8})([\dK])$/);
+    if (!m) return false;
+    let suma = 0, factor = 2;
+    for (let i = m[1].length - 1; i >= 0; i--) {
+      suma += Number(m[1][i]) * factor;
+      factor = factor === 7 ? 2 : factor + 1;
+    }
+    const resto = 11 - (suma % 11);
+    return (resto === 11 ? '0' : resto === 10 ? 'K' : String(resto)) === m[2];
+  }
+
+  // Marca la pregunta con problema y muestra el aviso debajo
+  function marcar(id, texto) {
+    const caja = $(id);
+    caja.classList.toggle('mal', !!texto);
+    const aviso = caja.querySelector('.aviso');
+    aviso.textContent = texto || '';
+    aviso.hidden = !texto;
+  }
+
+  // Al corregir una pregunta, su aviso desaparece
+  ['nombres', 'apellido1', 'apellido2'].forEach(id => $(id).addEventListener('input', () => marcar('p-nombre', '')));
+  ['correo', 'rut'].forEach(id => $(id).addEventListener('input', () => marcar('p-' + id, '')));
+  document.querySelectorAll('[name=mayor]').forEach(x => x.addEventListener('change', () => marcar('p-mayor', '')));
+  document.querySelectorAll('[name=disp]').forEach(x => x.addEventListener('change', () => marcar('p-disp', '')));
+  $('consentimiento').addEventListener('change', () => marcar('p-consent', ''));
+
+  $('form').addEventListener('submit', e => {
+    e.preventDefault();
+    const elegido = name => (document.querySelector(`[name=${name}]:checked`) || {}).value;
+    const datos = {
+      nombres: $('nombres').value.trim(),
+      apellido1: $('apellido1').value.trim(),
+      apellido2: $('apellido2').value.trim(),
+      correo: $('correo').value.trim(),
+      mayor: elegido('mayor'),
+      rut: $('rut').value.trim(),
+      disponibilidad: elegido('disp'),
+      consentimiento: $('consentimiento').checked,
+    };
+
+    const problemas = [
+      ['p-nombre', !datos.nombres ? 'Escribe tus nombres.' : !datos.apellido1 || !datos.apellido2 ? 'Escribe tus dos apellidos.' : ''],
+      ['p-correo', !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(datos.correo) && 'Escribe un correo válido, por ejemplo nombre@correo.cl.'],
+      ['p-mayor', !datos.mayor ? 'Elige una opción.' : datos.mayor === 'no' && 'Este testeo es solo para personas mayores de 18 años.'],
+      ['p-rut', !rutValido(datos.rut) && 'Revisa el RUT: el número después del guion no coincide.'],
+      ['p-disp', !datos.disponibilidad && 'Elige una opción.'],
+      ['p-consent', !datos.consentimiento && 'Marca la casilla para inscribirte.'],
+    ];
+    problemas.forEach(([id, texto]) => marcar(id, texto));
+    const primero = problemas.find(([, texto]) => texto);
+    if (primero) { $(primero[0]).scrollIntoView({ block: 'center', behavior: 'smooth' }); return; }
+
+    $('falla').hidden = true;
+    $('enviar').disabled = true;
+    $('enviarTexto').textContent = 'Enviando…';
+    google.script.run
+      .withSuccessHandler(r => {
+        $('form').hidden = true;
+        if (r.repetida) $('listoTitulo').textContent = 'Ya estabas inscrita/o.';
+        $('listo').hidden = false;
+        $('listo').scrollIntoView({ block: 'start' });
+      })
+      .withFailureHandler(err => {
+        $('falla').textContent = (err && err.message) || 'No se pudo enviar. Revisa tu conexión e inténtalo de nuevo.';
+        $('falla').hidden = false;
+        $('enviar').disabled = false;
+        $('enviarTexto').textContent = 'Inscribirme';
+      })
+      .registrar(datos);
+  });
+</script>
+</body>
+</html>

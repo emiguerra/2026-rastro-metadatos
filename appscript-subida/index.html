@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; margin: 16px; color: #111; background: #fff; }
+    h1 { font-size: 1.2rem; }
+    label { display: block; margin: 12px 0 4px; font-weight: 600; }
+    select, input, button { font-size: 1rem; }
+    button { margin-top: 16px; padding: 10px 16px; }
+    table { border-collapse: collapse; margin-top: 16px; font-size: .85rem; width: 100%; }
+    th, td { border-bottom: 1px solid #ddd; padding: 6px 4px; text-align: left; vertical-align: top; }
+    .no { color: #b00020; font-weight: 600; }
+    .si { color: #0a7a2f; font-weight: 600; }
+    #estado { margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>rastro — prueba de canal</h1>
+
+  <label for="telefono">Teléfono</label>
+  <select id="telefono">
+    <option value="iphone">iPhone</option>
+    <option value="android">Android</option>
+  </select>
+
+  <label for="fotos">Fotos</label>
+  <input id="fotos" type="file" accept="image/*" multiple>
+
+  <table id="tabla" hidden>
+    <thead>
+      <tr><th>Archivo (como lo ve el navegador)</th><th>Tipo</th><th>GPS</th><th>Fecha</th><th>Modelo</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <button id="subir" disabled>Subir</button>
+  <div id="estado"></div>
+
+  <script>
+    const input = document.getElementById('fotos');
+    const tabla = document.getElementById('tabla');
+    const cuerpo = tabla.querySelector('tbody');
+    const boton = document.getElementById('subir');
+    const estado = document.getElementById('estado');
+    let lecturas = [];
+
+    // Lee los metadatos en el teléfono, antes de subir: muestra si el GPS
+    // ya se perdió al elegir la foto. No muestra coordenadas.
+    input.addEventListener('change', async () => {
+      lecturas = [];
+      cuerpo.innerHTML = '';
+      for (const file of input.files) {
+        let m = null;
+        try {
+          // Sin "pick": con pick, exifr no calcula latitude/longitude
+          m = await exifr.parse(file);
+        } catch (e) { /* sin metadatos legibles */ }
+        const visto = {
+          nombre: file.name,
+          tipo: file.type || '?',
+          bytes: file.size,
+          gps: !!(m && m.latitude != null),
+          fecha: m && m.DateTimeOriginal ? String(m.DateTimeOriginal) : null,
+          modelo: m && m.Model ? `${m.Make || ''} ${m.Model}`.trim() : null,
+          navegador: navigator.userAgent,
+        };
+        lecturas.push({ file, visto });
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${visto.nombre}<br><small>${(visto.bytes / 1e6).toFixed(1)} MB</small></td>
+          <td>${visto.tipo}</td>
+          <td class="${visto.gps ? 'si' : 'no'}">${visto.gps ? 'sí' : 'no'}</td>
+          <td>${visto.fecha ? 'sí' : '<span class="no">no</span>'}</td>
+          <td>${visto.modelo || '<span class="no">no</span>'}</td>`;
+        cuerpo.appendChild(tr);
+      }
+      tabla.hidden = lecturas.length === 0;
+      boton.disabled = lecturas.length === 0;
+      estado.textContent = '';
+    });
+
+    function base64(file) {
+      return new Promise((ok, mal) => {
+        const r = new FileReader();
+        r.onload = () => ok(r.result.split(',')[1]);
+        r.onerror = mal;
+        r.readAsDataURL(file);
+      });
+    }
+
+    function subirUna(archivo) {
+      return new Promise((ok, mal) =>
+        google.script.run.withSuccessHandler(ok).withFailureHandler(mal).subir(archivo));
+    }
+
+    boton.addEventListener('click', async () => {
+      boton.disabled = true;
+      const telefono = document.getElementById('telefono').value;
+      let i = 0;
+      for (const { file, visto } of lecturas) {
+        i++;
+        estado.textContent = `Subiendo ${i} de ${lecturas.length}…`;
+        try {
+          await subirUna({ telefono, nombre: file.name, tipo: file.type || 'application/octet-stream',
+                           datos: await base64(file), visto });
+        } catch (e) {
+          estado.textContent = `Falló ${file.name}: ${e.message || e}`;
+          boton.disabled = false;
+          return;
+        }
+      }
+      estado.textContent = `Listo: ${lecturas.length} foto(s) subidas.`;
+    });
+  </script>
+</body>
+</html>

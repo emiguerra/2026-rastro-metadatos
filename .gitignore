@@ -1,0 +1,3 @@
+# valores reales (IDs de Drive, URL de la aplicación, lugar): nunca al repo
+.privado/
+.DS_Store
