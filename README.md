@@ -79,6 +79,7 @@ compara canales de subida (Forms, correo, Drive, Apps Script) contra las fotos o
 brew install exiftool
 python3 evaluar_canal.py ~/Desktop/rastro-prueba-canal
 python3 evaluar_canal.py ~/Desktop/rastro-prueba-canal --detalle   # una fila por archivo
+python3 -m unittest discover -s tests -v                    # pruebas de los helpers
 ```
 
 espera esta estructura, con 3 fotos por teléfono:
