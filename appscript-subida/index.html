@@ -4,6 +4,7 @@
   <base target="_top">
   <meta charset="utf-8">
   <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
+  <script><?!= include('metadatos') ?></script>
   <style>
     body { font-family: -apple-system, system-ui, sans-serif; margin: 16px; color: #111; background: #fff; }
     h1 { font-size: 1.2rem; }
@@ -53,18 +54,16 @@
       lecturas = [];
       cuerpo.innerHTML = '';
       for (const file of input.files) {
-        let m = null;
-        try {
-          // Sin "pick": con pick, exifr no calcula latitude/longitude
-          m = await exifr.parse(file);
-        } catch (e) { /* sin metadatos legibles */ }
+        const m = await RastroExif.leer(file);
         const visto = {
           nombre: file.name,
           tipo: file.type || '?',
           bytes: file.size,
-          gps: !!(m && m.latitude != null),
-          fecha: m && m.DateTimeOriginal ? String(m.DateTimeOriginal) : null,
-          modelo: m && m.Model ? `${m.Make || ''} ${m.Model}`.trim() : null,
+          gps: m.gps,
+          fecha: m.fecha,
+          zona: m.zona,
+          lectura: m.estado,
+          modelo: m.modelo,
           navegador: navigator.userAgent,
         };
         lecturas.push({ file, visto });
@@ -103,7 +102,7 @@
         i++;
         estado.textContent = `Subiendo ${i} de ${lecturas.length}…`;
         try {
-          await subirUna({ telefono, nombre: file.name, tipo: file.type || 'application/octet-stream',
+          await subirUna({ rut: 'PRUEBA', telefono, nombre: file.name, tipo: file.type || 'application/octet-stream',
                            datos: await base64(file), visto });
         } catch (e) {
           estado.textContent = `Falló ${file.name}: ${e.message || e}`;

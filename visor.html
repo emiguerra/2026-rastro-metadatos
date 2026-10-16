@@ -6,15 +6,16 @@
 <title>Visor · rastro</title>
 <!--
   Visor local de las fotos del testeo. Abrir con Live Server desde la carpeta metadatos/
-  (necesita comunas.json al lado).
+  (necesita comunas.json al lado). Las fotos se mantienen solo en memoria mientras la página está abierta.
   Lee la pestaña Subidas a través del Apps Script (metadatos/appscript-subida/Code.gs),
   agrupa las fotos por participante (Código P) y muestra el recorrido de cada uno.
-  Las fotos de un participante se descargan solo al abrirlo y quedan guardadas en este navegador.
+  Las fotos de un participante se descargan solo al abrirlo y permanecen en memoria durante esta sesión.
 -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;700&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
+<script src="metadatos.js"></script>
 <style>
   /* Mismo sistema que las páginas del testeo: blanco, negro y verde ácido. El verde marca
      lo seleccionado; "sin ubicación" se marca en negro con fondo verde para que salte a la vista. */
@@ -262,7 +263,7 @@
   <label class="btn sec" for="archivos">Fotos del computador</label>
   <input id="archivos" type="file" accept="image/*,.heic,.heif" multiple>
   <button class="btn sec" id="exportarTodo" disabled>Exportar todo .txt</button>
-  <button class="btn sec" id="olvidar">Borrar fotos guardadas</button>
+  <button class="btn sec" id="olvidar">Borrar datos cargados</button>
   <button class="btn sec" id="muestra">Expediente de muestra</button>
   <p class="estado" id="estado">Escribe la clave y toca "Cargar planilla". Las fotos se leen en este navegador.</p>
 </header>
@@ -328,7 +329,8 @@
   }
   const guardarPref = (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} };
   const leerPref = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
-  $('clave').value = leerPref('rastro-clave-visor');
+  $('clave').value = '';
+  try { localStorage.removeItem('rastro-clave-visor'); indexedDB.deleteDatabase('rastro-visor'); } catch (e) {}
 
   // ---- Comunas: polígonos de la BCN (comunas.json), cruce punto-polígono en el navegador ----
   async function cargarComunas() {
@@ -380,9 +382,11 @@
     const m = s && String(s).match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2})/);
     if (!m) return null;
     const [, y, mo, d, hh, mm] = m.map(Number);
-    return { y, mo, d, hh, mm, dia: DIAS[new Date(y, mo - 1, d).getDay()] };
+    const fecha = new Date(Date.UTC(y, mo - 1, d));
+    if (mo < 1 || mo > 12 || fecha.getUTCFullYear() !== y || fecha.getUTCMonth() !== mo - 1 || fecha.getUTCDate() !== d || hh > 23 || mm > 59) return null;
+    return { y, mo, d, hh, mm, dia: DIAS[fecha.getUTCDay()] };
   }
-  const comunaTxt = f => f.fallo ? 'no se pudo descargar' : f.comuna ? f.comuna.comuna : f.gps ? 'fuera de las comunas' : f.probable ? `≈ ${f.probable.comuna.comuna} (probable)` : 'sin ubicación';
+  const comunaTxt = f => f.fallo ? 'no se pudo descargar' : f.estado === 'error' ? 'metadatos ilegibles' : f.comuna ? f.comuna.comuna : f.gps ? 'fuera de las comunas' : f.probable ? `≈ ${f.probable.comuna.comuna} (probable)` : 'sin ubicación';
 
   // ---- Comuna probable para fotos sin GPS ----
   // Una foto sin ubicación toma la comuna de la foto con GPS más cercana en el tiempo, del mismo día
@@ -399,6 +403,7 @@
       let mejor = null;
       for (const x of conComuna) {
         if (x.q.y !== q.y || x.q.mo !== q.mo || x.q.d !== q.d) continue;
+        if (x.f.zona !== f.zona) continue;
         const min = minutosDe(x.q) - minutosDe(q);
         if (Math.abs(min) <= VENTANA_MIN && (!mejor || Math.abs(min) < Math.abs(mejor.minutos))) mejor = { comuna: x.f.comuna, minutos: min };
       }
@@ -410,46 +415,13 @@
 
   // ---- Lectura de metadatos (de un File o un Blob) ----
   async function leer(blob, nombre, extra = {}) {
-    let exif = null, gps = null;
-    try { exif = await exifr.parse(blob, { tiff: true, exif: true, gps: true, xmp: true, icc: false, iptc: true, reviveValues: false }); } catch (e) {}
-    try { gps = await exifr.gps(blob); } catch (e) {}
+    const m = await RastroExif.leer(blob);
     const f = {
-      nombre, url: URL.createObjectURL(blob), ...extra, meta: exif || {},
-      lat: gps && typeof gps.latitude === 'number' ? gps.latitude : null,
-      lon: gps && typeof gps.longitude === 'number' ? gps.longitude : null,
-      fecha: exif && exif.DateTimeOriginal || null,
-      zona: exif && exif.OffsetTimeOriginal || null,
-      error: exif && typeof exif.GPSHPositioningError === 'number' ? exif.GPSHPositioningError : null,
-      modelo: exif && exif.Model ? `${exif.Make || ''} ${exif.Model}`.trim() : null,
+      nombre, url: URL.createObjectURL(blob), ...extra, ...m,
     };
-    f.gps = f.lat != null;
     f.comuna = buscarComuna(f);
     return f;
   }
-
-  // ---- Fotos ya descargadas de Drive: se guardan en este navegador (IndexedDB) ----
-  const BD = new Promise(ok => {
-    try {
-      const r = indexedDB.open('rastro-visor', 1);
-      r.onupgradeneeded = () => r.result.createObjectStore('fotos');
-      r.onsuccess = () => ok(r.result);
-      r.onerror = () => ok(null);
-    } catch (e) { ok(null); }
-  });
-  async function bd(modo, accion) {
-    const db = await BD;
-    if (!db) return null;
-    return new Promise(ok => {
-      try {
-        const req = accion(db.transaction('fotos', modo).objectStore('fotos'));
-        req.onsuccess = () => ok(req.result ?? null);
-        req.onerror = () => ok(null);
-      } catch (e) { ok(null); }
-    });
-  }
-  const guardada = id => bd('readonly', s => s.get(id));
-  const guardar = (id, v) => bd('readwrite', s => s.put(v, id));
-  const borrarGuardadas = () => bd('readwrite', s => s.clear());
 
   // ---- Apps Script ----
   async function api(params) {
@@ -488,7 +460,6 @@
   async function cargarPlanilla() {
     const clave = $('clave').value.trim();
     if (!clave) return avisar('Escribe la clave del visor. Se crea con crearClaveVisor en Apps Script.', true);
-    guardarPref('rastro-clave-visor', clave);
     $('actualizar').disabled = true;
     avisar('Leyendo la planilla…');
     try {
@@ -547,19 +518,14 @@
         try {
           let f = fotoPorId.get(fila.id);
           if (!f) {
-            let guardado = await guardada(fila.id);
-            if (!guardado) {
-              const a = await api({ accion: 'foto', id: fila.id });
-              guardado = { nombre: a.nombre, blob: aBlob(a.datos, a.tipo) };
-              await guardar(fila.id, guardado);
-            }
-            f = await leer(guardado.blob, guardado.nombre, { id: fila.id });
+            const a = await api({ accion: 'foto', id: fila.id });
+            f = await leer(aBlob(a.datos, a.tipo), a.nombre, { id: fila.id });
             fotoPorId.set(fila.id, f);
           }
           f.fila = fila;
           res[i] = f;
         } catch (err) {
-          res[i] = { id: fila.id, nombre: fila['Archivo'] || fila.id, fila, url: null, gps: false, lat: null, lon: null, fecha: null, comuna: null, meta: {}, fallo: err.message };
+          res[i] = { id: fila.id, nombre: fila['Archivo'] || fila.id, fila, url: null, gps: false, lat: null, lon: null, fecha: null, comuna: null, fallo: err.message };
         }
         g.progreso++;
         if (grupoActual === k) pintarPrincipal();
@@ -716,6 +682,7 @@
 
     let ubic;
     if (f.fallo) ubic = `<div class="grande">Sin datos</div><p class="sub">No se pudo descargar: ${esc(f.fallo)}</p>`;
+    else if (f.estado === 'error') ubic = `<div class="grande"><span class="falta">Lectura fallida</span></div><p class="sub">El archivo se descargó, pero no se pudieron interpretar sus metadatos.</p>`;
     else if (!f.gps && f.probable) ubic = `<div class="grande">≈ ${esc(f.probable.comuna.comuna)}</div><p class="sub">Comuna probable. La foto no trae GPS; se estima con la foto con ubicación más cercana del mismo día, tomada ${esc(distanciaTxt(f.probable.minutos))}.</p>`;
     else if (!f.gps) ubic = `<div class="grande"><span class="falta">Sin ubicación</span></div><p class="sub">La foto no trae coordenadas GPS${partesFecha(f.fecha) ? ' y no hay otra foto con ubicación ese día a menos de 3 horas' : ''}.</p>`;
     else if (!comunas) ubic = `<div class="grande">…</div><p class="sub">Cargando el mapa de comunas.</p>`;
@@ -724,9 +691,7 @@
       <p class="sub">${esc(f.comuna.provincia)} · ${esc(f.comuna.region)}</p>
       <div class="mapa">${mapaSVG(f.comuna, f.lat, f.lon)}
         <div style="display:grid;gap:.25rem;min-width:0">
-          <span class="mono">${f.lat.toFixed(6)}, ${f.lon.toFixed(6)}</span>
-          ${f.error != null ? `<span class="sub">Margen de error ± ${Math.round(f.error)} m</span>` : ''}
-          <a href="https://www.google.com/maps?q=${f.lat.toFixed(7)},${f.lon.toFixed(7)}" target="_blank" rel="noopener">Ver en Google Maps ↗</a>
+          <span class="sub">Punto aproximado según el GPS de la foto${f.error != null ? ` · margen informado ± ${Math.round(f.error)} m` : ''}.</span>
         </div></div>`;
 
     const p = partesFecha(f.fecha);
@@ -740,7 +705,7 @@
       const diag = f.fallo ? '' : enTel && !f.gps ? 'Se perdió al subir o en Drive.' : !enTel && !f.gps ? 'Ya venía sin ubicación desde el teléfono.' : enTel && f.gps ? 'Se conservó de punta a punta.' : '';
       canal = `<div class="canal"><span class="rotulo">Subida</span>
         <span>${esc(f.fila['Teléfono'] || '—')} · ${f.fila['Subida'] ? new Date(f.fila['Subida']).toLocaleString('es-CL') : ''}</span>
-        <span>GPS en el teléfono: <b>${enTel ? 'sí' : 'no'}</b> → en Drive: <b>${f.gps ? 'sí' : 'no'}</b>${diag ? ` · ${diag}` : ''}</span>
+        <span>Lectura en teléfono: <b>${esc(f.fila['Lectura de metadatos'] || 'sin dato')}</b> · GPS en teléfono: <b>${enTel ? 'sí' : 'no'}</b> → en Drive: <b>${f.gps ? 'sí' : 'no'}</b>${diag ? ` · ${diag}` : ''}</span>
         ${f.modelo ? `<span>${esc(f.modelo)}</span>` : ''}</div>`;
     }
 
@@ -763,19 +728,9 @@
   }
 
   // ---- Exportar ----
-  function valorTxt(v) {
-    if (v == null) return '';
-    if (Array.isArray(v) || ArrayBuffer.isView(v)) {
-      const arr = Array.from(v);
-      return arr.length > 24 ? `[${arr.length} valores]` : arr.join(', ');
-    }
-    if (typeof v === 'object') return JSON.stringify(v).slice(0, 300);
-    return String(v).replace(/\s+/g, ' ').slice(0, 300);
-  }
-
   function textoExport(lista) {
     const fechaTxt = x => { const q = partesFecha(x.fecha); return q ? `${q.dia} ${q.d} de ${MESES[q.mo - 1]} de ${q.y}, ${dosDig(q.hh)}:${dosDig(q.mm)}` : 'sin fecha'; };
-    const L = ['rastro · visor · exportación', `Generado: ${new Date().toLocaleString('es-CL')}`, 'Comunas: polígonos de la BCN. Coordenadas exactas incluidas.', ''];
+    const L = ['rastro · visor · exportación', `Generado: ${new Date().toLocaleString('es-CL')}`, 'Comunas: polígonos de la BCN. Las coordenadas exactas se omiten.', ''];
     lista.forEach(g => {
       const e = etiqueta(g.clave), r = resumen(g), fotos = ordenadas(g.fotos);
       L.push(`######## ${e.titulo} (${e.sub}) ########`);
@@ -793,12 +748,8 @@
         }
         if (x.fallo) { L.push(`Error: ${x.fallo}`); return; }
         L.push(`Comuna: ${comunaTxt(x)}${x.comuna ? ` (${x.comuna.provincia}, ${x.comuna.region})` : ''}`);
-        L.push(`Coordenadas: ${x.gps ? `${x.lat.toFixed(7)}, ${x.lon.toFixed(7)}${x.error != null ? ` (± ${Math.round(x.error)} m)` : ''}` : '—'}`);
+        L.push(`Coordenadas exactas: omitidas de esta exportación.`);
         L.push(`Fecha y hora: ${fechaTxt(x)}${x.zona ? ` (${x.zona})` : ''}`);
-        L.push('-- Metadatos completos --');
-        const campos = Object.entries(x.meta || {}).filter(([k]) => k !== 'thumbnail');
-        if (!campos.length) L.push('(el archivo no trae metadatos legibles)');
-        campos.forEach(([k, v]) => L.push(`${k}: ${valorTxt(v)}`));
       });
       L.push('', '');
     });
@@ -1164,7 +1115,7 @@
         <span>${esc(resumenTxt)}</span>
         <div class="barra-ac"></div>
         <p class="final">${esc(frase)}</p>
-        <p class="nota">Datos leídos de los metadatos de las fotos que subiste. Las coordenadas exactas no se imprimen.${fotos.some(f => f.probable) ? ' ≈ Comuna probable: la foto no traía ubicación y se estima con la foto con GPS más cercana del mismo día.' : ''}</p>
+        <p class="nota">Datos leídos de los metadatos de las fotos que subiste. El GPS registra lo que guardó la cámara y no acredita por sí solo la presencia de una persona. Las coordenadas exactas no se imprimen.${fotos.some(f => f.probable) ? ' ≈ Comuna probable: la foto no traía ubicación y se estima con la foto con GPS más cercana del mismo día y el mismo offset horario.' : ''}</p>
       </div>
       <footer class="pie"><span>no nos dijiste dónde estuviste // ${esc(titulo)}</span><b>rastro 02/02</b></footer>`);
   }
@@ -1263,15 +1214,22 @@
     if (e.key === 'ArrowRight' && fichaIdx < n - 1) { fichaIdx++; pintarFicha(); }
   });
 
-  // Las fotos guardadas traen GPS: este botón las borra de este navegador
-  $('olvidar').addEventListener('click', async () => {
-    await borrarGuardadas();
-    fotoPorId.forEach(f => f.url && URL.revokeObjectURL(f.url));
+  // Elimina la copia en memoria y los object URLs; al cerrar la página también desaparecen.
+  $('olvidar').addEventListener('click', () => {
+    const urls = new Set();
+    fotoPorId.forEach(f => { if (f.url) urls.add(f.url); });
+    grupos.forEach(g => g.fotos.forEach(f => { if (f.url) urls.add(f.url); }));
+    urls.forEach(url => URL.revokeObjectURL(url));
     fotoPorId.clear();
-    grupos.forEach((g, k) => { if (k !== 'computador') Object.assign(g, { fotos: [], cargado: false, cargando: false, progreso: 0 }); });
+    grupos.forEach((g, k) => {
+      if (k === 'computador') grupos.delete(k);
+      else Object.assign(g, { fotos: [], cargado: false, cargando: false, progreso: 0 });
+    });
+    if (grupoActual === 'computador') grupoActual = null;
+    $('clave').value = '';
     cerrarFicha();
     pintarTodo();
-    avisar('Se borraron las fotos guardadas en este navegador. Se descargan de nuevo al abrir cada participante.');
+    avisar('Se borraron las fotos cargadas de esta sesión.');
   });
 
   // ---- Control desde la consola del testeo (2026-tres-analisis-paralelo/consola.html) ----

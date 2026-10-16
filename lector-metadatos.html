@@ -3,6 +3,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,400..800&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <script src="https://cdn.jsdelivr.net/npm/exifr@7.1.3/dist/full.umd.js"></script>
+<script src="metadatos.js"></script>
 <style>
   /* Layout: visor de una foto a la vez; a la derecha (abajo en el teléfono) comuna y fecha; tira de fotos y recorrido debajo */
   :root {
@@ -196,24 +197,19 @@
     const m = s && s.match(/^(\d{4}):(\d{2}):(\d{2}) (\d{2}):(\d{2})/);
     if (!m) return null;
     const [, y, mo, d, hh, mm] = m.map(Number);
-    return { y, mo, d, hh, mm, dia: DIAS[new Date(y, mo - 1, d).getDay()] };
+    const fecha = new Date(Date.UTC(y, mo - 1, d));
+    if (mo < 1 || mo > 12 || fecha.getUTCFullYear() !== y || fecha.getUTCMonth() !== mo - 1 || fecha.getUTCDate() !== d || hh > 23 || mm > 59) return null;
+    return { y, mo, d, hh, mm, dia: DIAS[fecha.getUTCDay()] };
   }
   const dosDig = n => String(n).padStart(2, '0');
 
   // ---- Lectura de cada foto ----
   async function leer(file) {
-    let exif = null, gps = null;
-    try { exif = await exifr.parse(file, { tiff: true, exif: true, gps: true, xmp: false, icc: false, iptc: false, reviveValues: false }); } catch (e) {}
-    try { gps = await exifr.gps(file); } catch (e) {}
+    const m = await RastroExif.leer(file);
     const f = {
       nombre: file.name, url: URL.createObjectURL(file),
-      lat: gps && typeof gps.latitude === 'number' ? gps.latitude : null,
-      lon: gps && typeof gps.longitude === 'number' ? gps.longitude : null,
-      fecha: exif && exif.DateTimeOriginal || null,
-      zona: exif && exif.OffsetTimeOriginal || null,
-      error: exif && typeof exif.GPSHPositioningError === 'number' ? exif.GPSHPositioningError : null,
+      ...m,
     };
-    f.gps = f.lat != null;
     f.comuna = buscarComuna(f);
     return f;
   }
@@ -241,7 +237,9 @@
 
     // Ubicación
     let ubic;
-    if (!f.gps) {
+    if (f.estado === 'error') {
+      ubic = `<div class="grande falta">No se pudo leer</div><p class="sub">El navegador o el formato no permitieron leer los metadatos.</p>`;
+    } else if (!f.gps) {
       ubic = `<div class="grande falta">Sin ubicación</div><p class="sub">La foto no trae coordenadas GPS: se borraron en el canal o la cámara no las guardó.</p>`;
     } else if (f.comuna === undefined || (f.comuna === null && !comunas)) {
       ubic = `<div class="grande">…</div><p class="sub">Cargando el mapa de comunas.</p>`;
@@ -262,7 +260,9 @@
 
     // Fecha
     const p = partesFecha(f.fecha);
-    const fecha = p
+    const fecha = f.estado === 'error'
+      ? `<div class="grande falta">No se pudo leer</div><p class="sub">No se pudo comprobar si hay fecha de captura.</p>`
+      : p
       ? `<div class="grande">${p.dia} ${p.d} de ${MESES[p.mo - 1]}</div>
          <p class="sub"><span class="mono" style="font-size:15px;color:var(--ink)">${dosDig(p.hh)}:${dosDig(p.mm)}</span> · ${p.y}${f.zona ? ` · zona horaria ${esc(f.zona)}` : ' · sin zona horaria'}</p>`
       : `<div class="grande falta">Sin fecha</div><p class="sub">La foto no trae la fecha de captura.</p>`;

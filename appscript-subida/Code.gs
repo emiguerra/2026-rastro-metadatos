@@ -43,7 +43,7 @@ const CODIGO_PRUEBA = 'PRUEBA';
 const ENCABEZADOS = [
   'Subida', 'Teléfono', 'Archivo', 'Tipo', 'MB',
   'GPS en teléfono', 'Fecha de captura', 'Modelo', 'Navegador',
-  'Archivo en Drive', 'Código P',
+  'Archivo en Drive', 'Código P', 'Zona horaria de captura', 'Lectura de metadatos',
 ];
 
 const ENCABEZADOS_INSCRIPCION = [
@@ -65,9 +65,14 @@ function doGet(e) {
   const p = (e && e.parameter) || {};
   if (p.accion) return api_(p);
   const pagina = PAGINAS[p.p] || PAGINAS.registro;
-  return HtmlService.createHtmlOutputFromFile(pagina.archivo)
+  return HtmlService.createTemplateFromFile(pagina.archivo).evaluate()
     .setTitle(pagina.titulo)
     .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+}
+
+// Permite que las páginas de Apps Script compartan la misma rutina EXIF.
+function include(nombre) {
+  return HtmlService.createHtmlOutputFromFile(nombre).getContent();
 }
 
 // ---- Inscripción ----
@@ -373,38 +378,49 @@ function probarCorreo() {
 // ---- Subida de fotos ----
 
 function subir(archivo) {
-  let codigo = '';
-  if (archivo.rut) {
-    const e = estadoDeRut_(archivo.rut);
-    if (e.estado === 'no') throw new Error('Ese RUT no está inscrito.');
-    if (e.estado === 'pendiente') throw new Error('Tu inscripción todavía no está confirmada.');
-    codigo = e.codigo;
-  }
+  if (!archivo || typeof archivo !== 'object') throw new Error('La subida no tiene datos válidos.');
+  const e = estadoDeRut_(archivo.rut);
+  if (e.estado === 'no') throw new Error('Ese RUT no está inscrito.');
+  if (e.estado === 'pendiente') throw new Error('Tu inscripción todavía no está confirmada.');
+  const codigo = e.codigo;
+  const nombre = String(archivo.nombre || '').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').slice(0, 180);
+  const tiposExtension = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', heic: 'image/heic', heif: 'image/heif', webp: 'image/webp', tif: 'image/tiff', tiff: 'image/tiff', avif: 'image/avif' };
+  const extension = nombre.includes('.') ? nombre.split('.').pop().toLowerCase() : '';
+  const tipoInformado = String(archivo.tipo || '').toLowerCase().split(';')[0];
+  const tipo = tipoInformado.startsWith('image/') ? tipoInformado : tiposExtension[extension];
+  const datos = String(archivo.datos || '').replace(/^data:[^,]*,/, '');
+  if (!Object.values(tiposExtension).includes(tipo)) throw new Error('El archivo debe ser una imagen compatible.');
+  if (!nombre || !datos || datos.length > 21 * 1024 * 1024) throw new Error('La imagen supera el límite de 15 MB o está vacía.');
+  if (!archivo.visto || typeof archivo.visto !== 'object') throw new Error('No se pudieron leer los datos de la imagen.');
+  let bytes;
+  try { bytes = Utilities.base64Decode(datos); } catch (err) { throw new Error('La imagen llegó dañada.'); }
+  if (!bytes.length || bytes.length > 15 * 1024 * 1024) throw new Error('La imagen supera el límite de 15 MB o está vacía.');
+  const blob = Utilities.newBlob(bytes, tipo, nombre);
 
   // Las fotos llegan en paralelo: el candado evita crear dos carpetas con el mismo nombre
   const raiz = DriveApp.getFolderById(CARPETA_ID);
-  const nombreCarpeta = codigo || archivo.telefono;
-  let carpeta;
+  const nombreCarpeta = codigo;
+  let carpeta, f;
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
     const sub = raiz.getFoldersByName(nombreCarpeta);
     carpeta = sub.hasNext() ? sub.next() : raiz.createFolder(nombreCarpeta);
+    const existentes = carpeta.getFiles();
+    let total = 0;
+    while (existentes.hasNext()) { existentes.next(); total++; }
+    if (total >= 10) throw new Error('Esta carpeta ya alcanzó el límite de 10 fotos.');
+    f = carpeta.createFile(blob);
+    f.setDescription(JSON.stringify({ gps: archivo.visto.gps === true, fecha: String(archivo.visto.fecha || '').slice(0, 40) }));
   } finally {
     lock.releaseLock();
   }
 
-  const blob = Utilities.newBlob(
-    Utilities.base64Decode(archivo.datos), archivo.tipo, archivo.nombre
-  );
-  const f = carpeta.createFile(blob);
-  f.setDescription(JSON.stringify(archivo.visto));
-
   const v = archivo.visto;
   hoja_().appendRow([
-    new Date(), archivo.telefono, v.nombre, v.tipo, Math.round(v.bytes / 1e4) / 100,
-    v.gps ? 'sí' : 'no', v.fecha || 'no', v.modelo || 'no', v.navegador,
-    f.getUrl(), codigo,
+    new Date(), String(archivo.telefono || '').slice(0, 80), nombre, tipo, Math.round(bytes.length / 1e4) / 100,
+    v.gps === true ? 'sí' : 'no', String(v.fecha || 'no').slice(0, 40), String(v.modelo || 'no').slice(0, 120), String(v.navegador || '').slice(0, 240),
+    f.getUrl(), codigo, String(v.zona || 'no').slice(0, 8), String(v.lectura || 'desconocida').slice(0, 20),
   ]);
 
   if (codigo && codigo !== CODIGO_PRUEBA) vincularCarpeta_(codigo, carpeta);

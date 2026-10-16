@@ -1,6 +1,6 @@
 # 2026-rastro-metadatos
 
-herramientas para leer los metadatos de las fotos de los participantes de rastro: inscripción, subida de 7 fotos de la semana, y un visor que convierte esas fotos en un recorrido por comuna y día, sin guardar coordenadas exactas.
+herramientas para leer los metadatos de las fotos de los participantes de rastro: inscripción, subida de 7 fotos de la semana, y un visor que convierte esas fotos en un recorrido por comuna y día, sin mostrar coordenadas exactas en el expediente.
 
 la captura del cuerpo (postura, rostro, ojos) está en [2026-tres-analisis-paralelo](https://github.com/emiguerra/2026-tres-analisis-paralelo). la hoja 1 del expediente sale de ahí; la hoja 2, de este repo.
 
@@ -17,7 +17,7 @@ el contenido de fondo (qué trae una imagen, por qué comunas y no direcciones, 
 | evaluar canal | [evaluar_canal.py](evaluar_canal.py) | compara qué metadatos sobreviven en cada canal de subida (tabla en Markdown) |
 | comunas | [comunas.json](comunas.json) | polígonos de las 346 comunas de Chile, para el cruce punto-polígono |
 
-las páginas leen los metadatos con [exifr](https://github.com/MikeKovarik/exifr) en el navegador. el script de Python usa [ExifTool](https://exiftool.org). la comuna se calcula en el propio computador: las coordenadas no van a ningún servicio externo.
+las páginas leen los metadatos con [exifr](https://github.com/MikeKovarik/exifr) en el navegador. `metadatos.js` y `appscript-subida/metadatos.html` comparten el contrato de lectura. la fecha EXIF y su offset se conservan por separado; sin offset se trata como hora local de cámara, no como UTC. el script de Python usa [ExifTool](https://exiftool.org). la comuna se calcula en el propio computador: las coordenadas no van a ningún servicio externo durante ese cruce.
 
 ## el recorrido de una foto
 
@@ -31,10 +31,10 @@ las páginas leen los metadatos con [exifr](https://github.com/MikeKovarik/exifr
 
 una sola vez, en [script.google.com](https://script.google.com):
 
-1. crear un proyecto y copiar los cuatro archivos de `appscript-subida/` (los `.html` con el mismo nombre, sin extensión).
+1. crear un proyecto y copiar los archivos de `appscript-subida/`, incluidos los `.html` con el mismo nombre, sin extensión.
 2. en `Code.gs`, completar `CARPETA_ID` (carpeta de Drive donde llegan las fotos), `PLANILLA_ID`, `LUGAR`, `HORA_INICIO` y `FIRMA`.
 3. desde el editor, correr una vez cada una:
-   - `prepararPlanilla` crea las pestañas **Inscripciones** y **Subidas** y pide los permisos
+   - `prepararPlanilla` crea o actualiza los encabezados de **Inscripciones** y **Subidas** y pide los permisos
    - `instalarBotonCorreo` instala el disparador que manda el correo al marcar la casilla
    - `crearClaveVisor` genera la clave del visor y la muestra en el registro
 4. implementar como aplicación web (ejecutar como: yo; acceso: cualquier persona). copiar la URL que termina en `/exec` a `URL_APP`.
@@ -45,7 +45,7 @@ la persona que sube fotos no necesita cuenta de Google.
 
 - `/exec` inscripción
 - `/exec?p=fotos` subida de fotos. con `PRUEBA` en vez de RUT se puede probar sin estar inscrita
-- `/exec?p=prueba` prueba de canal: **muestra metadatos**, no compartir con participantes
+- `/exec?p=prueba` prueba de canal: **muestra metadatos**, no compartir con participantes; sube bajo el código de prueba
 - `/exec?accion=lista&clave=…` y `/exec?accion=foto&id=…&clave=…` API del visor
 
 ### casillas de la planilla
@@ -65,7 +65,7 @@ npx serve .        # o Live Server en VS Code, desde esta carpeta
 
 abrir `visor.html`, pegar la URL del Apps Script y la clave del visor. necesita `comunas.json` al lado, por eso no funciona abriendo el archivo con doble clic.
 
-las fotos de cada participante se descargan solo al abrirlo y quedan guardadas en ese navegador.
+las fotos de cada participante se descargan solo al abrirlo y permanecen en memoria mientras la página está abierta. Al recargar se vuelven a descargar.
 
 ## lector
 
@@ -79,6 +79,7 @@ compara canales de subida (Forms, correo, Drive, Apps Script) contra las fotos o
 brew install exiftool
 python3 evaluar_canal.py ~/Desktop/rastro-prueba-canal
 python3 evaluar_canal.py ~/Desktop/rastro-prueba-canal --detalle   # una fila por archivo
+python3 -m unittest discover -s tests -v                    # pruebas de los helpers
 ```
 
 espera esta estructura, con 3 fotos por teléfono:
@@ -100,11 +101,13 @@ resultado de la prueba (10 oct): se eligió la página propia en Apps Script. pr
 ```text
 appscript-subida/
   Code.gs          servidor: páginas, Drive, planilla, correos, API del visor
+  metadatos.html   rutina compartida de lectura EXIF de las páginas Apps Script
   registro.html    inscripción
   fotos.html       subida de las 7 fotos con el RUT
   index.html       prueba de canal (muestra metadatos)
 visor.html         recorrido por participante + expediente imprimible
 lector-metadatos.html   lector de fotos sueltas, solo en el navegador
+metadatos.js            rutina compartida de lectura EXIF de las páginas locales
 evaluar_canal.py   tabla de qué sobrevive en cada canal (exiftool)
 comunas.json       polígonos comunales (GeoJSON)
 ```
@@ -113,10 +116,10 @@ la comuna se asigna igual en el visor y en el lector: primero se descarta por ca
 
 ## privacidad
 
-- las fotos traen GPS y pueden revelar dónde vive o trabaja una persona. **ninguna foto entra a este repositorio.**
+- las fotos traen GPS y pueden revelar dónde vive o trabaja una persona. **ninguna foto entra a este repositorio.** los originales en Drive conservan sus metadatos para permitir la lectura posterior.
 - la planilla separa datos personales (Inscripciones) de las fotos (Subidas, solo con código P).
 - la API del visor no entrega nada sin la clave, y solo archivos de la carpeta de fotos o sus subcarpetas.
-- el recorrido se guarda por comuna, fecha y hora. las coordenadas se descartan después de asignar la comuna.
+- el recorrido se presenta por comuna, fecha y hora. el visor no persiste la clave ni las fotos en almacenamiento del navegador y omite coordenadas y EXIF completo de sus exportaciones. mientras está abierto, necesita las coordenadas en memoria para asignar la comuna y dibujar el punto.
 - el RUT se cruza a mano y se muestra al mismo nivel: comuna, nunca una dirección.
 - no hay reconocimiento facial: la persona se identifica sola, con su RUT o su código.
 - las fotos de la prueba de canal se borran después de probar el script de extracción.
