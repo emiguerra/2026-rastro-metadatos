@@ -63,7 +63,13 @@ si los correos no llegan, `probarCorreo` (con una dirección en `PRUEBA_A`) mand
 npx serve .        # o Live Server en VS Code, desde esta carpeta
 ```
 
-abrir `visor.html`, pegar la URL del Apps Script y la clave del visor. necesita `comunas.json` al lado, por eso no funciona abriendo el archivo con doble clic.
+antes, una sola vez, crear `.privado/config.js` con la URL del Apps Script (la carpeta está en `.gitignore`):
+
+```js
+window.RASTRO_API = 'https://script.google.com/macros/s/…/exec';
+```
+
+abrir `visor.html` y escribir la clave del visor. necesita `comunas.json` al lado, por eso no funciona abriendo el archivo con doble clic.
 
 las fotos de cada participante se descargan solo al abrirlo y quedan guardadas en ese navegador.
 

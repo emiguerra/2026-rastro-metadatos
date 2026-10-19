@@ -304,9 +304,12 @@
   <div class="ficha" role="dialog" aria-modal="true" aria-label="Ficha de la foto" id="ficha"></div>
 </div>
 
+<!-- La URL real del Apps Script vive en .privado/config.js (fuera del repo, ver .gitignore) -->
+<script src=".privado/config.js"></script>
 <script>
-  // URL de la aplicación web de Apps Script (la misma de la página de subida, termina en /exec)
-  const API = 'https://script.google.com/macros/s/ID_DE_LA_APLICACION/exec';
+  // URL de la aplicación web de Apps Script (la misma de la página de subida, termina en /exec).
+  // Se toma de .privado/config.js: window.RASTRO_API = 'https://script.google.com/macros/s/…/exec';
+  const API = window.RASTRO_API || 'https://script.google.com/macros/s/ID_DE_LA_APLICACION/exec';
   const EN_PARALELO = 3;
 
   const DIAS = ['domingo', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado'];
@@ -453,6 +456,7 @@
 
   // ---- Apps Script ----
   async function api(params) {
+    if (API.includes('ID_DE_LA_APLICACION')) throw new Error('Falta la URL del Apps Script: crea .privado/config.js (ver README).');
     const url = API + '?' + new URLSearchParams({ ...params, clave: $('clave').value.trim() });
     const j = await (await fetch(url)).json();
     if (j.error) throw new Error(j.error);
